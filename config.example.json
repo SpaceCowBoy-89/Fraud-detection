@@ -1,0 +1,22 @@
+{
+  "api_key": "YOUR_API_KEY_HERE",
+  "risk_thresholds": {
+    "high": 50,
+    "medium": 25
+  },
+  "detection_weights": {
+    "excessive_dots": 25,
+    "digit_suffix": 20,
+    "scrambled_pattern": 35,
+    "name_number_pattern": 40,
+    "written_number": 25,
+    "repeated_word": 35,
+    "suspicious_name": 30,
+    "domain_concentration": 30
+  },
+  "ip_velocity_threshold": 10,
+  "repeated_word_threshold": 3,
+  "whitelisted_affiliates": [],
+  "high_risk_countries": [],
+  "database_path": "affiliate_data.db"
+}

@@ -1,0 +1,37 @@
+# Data files (sensitive customer information)
+data/*.csv
+reports/*.csv
+reports/*.html
+reports/visualizations/
+
+# Databases and logs (sensitive / local)
+*.db
+*.log
+
+# Config with secrets (use config.example.json as template)
+config.json
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+*.egg-info/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Keep directory structure
+!data/README.md
+!reports/.gitkeep

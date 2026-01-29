@@ -313,6 +313,9 @@ class FraudDetectionCLI:
                     analysis['DUID'] = detector.get_column(row, 'duid', 'N/A')
                     analysis['payout_amount'] = detector.get_column(row, 'payout_amount', 0)
                     analysis['data_type'] = data_type
+                    # Capture affiliate info
+                    analysis['webmaster_code'] = detector.get_column(row, 'webmaster_code', None)
+                    analysis['campaign'] = detector.get_column(row, 'campaign', None)
                     results.append(analysis)
                 
                 # Save results
@@ -491,6 +494,207 @@ class FraudDetectionCLI:
             CLIHelpers.wait_for_input()
 
     # ==================== ADVANCED ANALYSIS ====================
+    
+    def affiliate_analysis(self):
+        """Analyze fraud by affiliate/webmaster"""
+        while True:
+            CLIHelpers.show_header()
+            self.menu.show_breadcrumb()
+            CLIHelpers.show_section("👥 AFFILIATE ANALYSIS")
+            
+            choice = create_submenu_prompt("Options:", [
+                {'key': '1', 'label': 'Fraud by Affiliate', 'help': 'Ranked list of affiliates by fraud'},
+                {'key': '2', 'label': 'View Specific Affiliate', 'help': 'Drill into one affiliate'},
+                {'key': '3', 'label': 'Cross-Affiliate Patterns', 'help': 'Patterns across multiple affiliates'},
+                {'key': '4', 'label': 'Export Affiliate Report', 'help': 'Export to CSV'},
+            ])
+            
+            if choice == 'back':
+                return
+            
+            if choice == '1':
+                self._fraud_by_affiliate()
+            elif choice == '2':
+                self._view_specific_affiliate()
+            elif choice == '3':
+                self._cross_affiliate_patterns()
+            elif choice == '4':
+                self._export_affiliate_report()
+    
+    def _fraud_by_affiliate(self):
+        """Show fraud statistics by affiliate"""
+        df = self.db.get_affiliate_fraud_stats()
+        
+        if df.empty:
+            CLIHelpers.show_warning("No affiliate data found.")
+            console.print("[dim]Run fraud analysis first, or fetch data with affiliate info.[/dim]")
+            CLIHelpers.wait_for_input()
+            return
+        
+        console.print(f"\n[bold]Fraud by Affiliate ({len(df)} affiliates)[/bold]\n")
+        
+        # Sort options
+        console.print("[dim]Sorted by high-risk count (descending)[/dim]\n")
+        
+        columns = [
+            {'name': 'Affiliate', 'style': 'blue', 'width': 15, 'priority': 1},
+            {'name': 'Total', 'style': 'black', 'width': 8, 'justify': 'right', 'priority': 1},
+            {'name': 'High', 'style': 'red', 'width': 6, 'justify': 'right', 'priority': 1},
+            {'name': 'Med', 'style': 'yellow', 'width': 6, 'justify': 'right', 'priority': 2},
+            {'name': 'Low', 'style': 'green', 'width': 6, 'justify': 'right', 'priority': 3},
+            {'name': 'High %', 'style': 'red', 'width': 8, 'justify': 'right', 'priority': 1},
+            {'name': 'Avg Risk', 'style': 'black', 'width': 8, 'justify': 'right', 'priority': 2},
+            {'name': 'HR Payout', 'style': 'red', 'width': 12, 'justify': 'right', 'priority': 1},
+        ]
+        
+        table = CLIHelpers.create_table(columns)
+        
+        for _, row in df.head(20).iterrows():
+            table.add_row(
+                CLIHelpers.truncate(str(row['webmaster_code']), 13),
+                f"{int(row['total_accounts']):,}",
+                f"{int(row['high_risk_count']):,}",
+                f"{int(row['medium_risk_count']):,}",
+                f"{int(row['low_risk_count']):,}",
+                f"{row['high_risk_pct']:.1f}%",
+                f"{row['avg_risk_score']:.0f}",
+                CLIHelpers.format_currency(row['high_risk_payout'])
+            )
+        
+        console.print(table)
+        
+        # Summary
+        total_high = df['high_risk_count'].sum()
+        total_payout = df['high_risk_payout'].sum()
+        console.print(f"\n[bold]Total:[/bold] {total_high:,} high-risk accounts | {CLIHelpers.format_currency(total_payout)} at risk")
+        
+        CLIHelpers.wait_for_input()
+    
+    def _view_specific_affiliate(self):
+        """View fraud details for a specific affiliate"""
+        webmaster_code = CLIHelpers.prompt("Enter webmaster code")
+        
+        df = self.db.get_fraud_by_affiliate(webmaster_code, limit=50)
+        
+        if df.empty:
+            CLIHelpers.show_warning(f"No fraud results found for affiliate: {webmaster_code}")
+            CLIHelpers.wait_for_input()
+            return
+        
+        # Summary stats
+        high_risk = len(df[df['risk_score'] >= 50])
+        medium_risk = len(df[(df['risk_score'] >= 25) & (df['risk_score'] < 50)])
+        total_payout = df['payout_amount'].sum()
+        
+        console.print(f"\n[bold]Affiliate: {webmaster_code}[/bold]")
+        console.print(f"Total accounts: {len(df)} | High risk: {high_risk} | Medium risk: {medium_risk}")
+        console.print(f"Total payout: {CLIHelpers.format_currency(total_payout)}\n")
+        
+        # Show high-risk accounts
+        high_risk_df = df[df['risk_score'] >= 50].head(15)
+        
+        if not high_risk_df.empty:
+            console.print("[bold red]High-Risk Accounts:[/bold red]\n")
+            
+            columns = [
+                {'name': 'Email', 'style': 'black', 'width': 35, 'priority': 1},
+                {'name': 'Risk', 'style': 'red', 'width': 6, 'justify': 'right', 'priority': 1},
+                {'name': 'Payout', 'style': 'black', 'width': 12, 'justify': 'right', 'priority': 1},
+                {'name': 'DUID', 'style': 'dim', 'width': 12, 'priority': 2},
+            ]
+            
+            table = CLIHelpers.create_table(columns)
+            
+            for _, row in high_risk_df.iterrows():
+                table.add_row(
+                    CLIHelpers.truncate(str(row['email']), 33),
+                    str(row['risk_score']),
+                    CLIHelpers.format_currency(row['payout_amount']),
+                    str(row['duid'])
+                )
+            
+            console.print(table)
+        
+        CLIHelpers.wait_for_input()
+    
+    def _cross_affiliate_patterns(self):
+        """Find patterns that appear across multiple affiliates"""
+        CLIHelpers.show_info("Analyzing cross-affiliate patterns...")
+        
+        patterns = self.db.get_cross_affiliate_patterns()
+        
+        # Cross-affiliate domains
+        domains = patterns.get('cross_affiliate_domains', [])
+        if domains:
+            console.print("\n[bold]Email Domains Appearing with Multiple Affiliates:[/bold]")
+            console.print("[dim]These may indicate platform-wide fraud or shared fraud operations[/dim]\n")
+            
+            columns = [
+                {'name': 'Domain', 'style': 'blue', 'width': 25, 'priority': 1},
+                {'name': 'Affiliates', 'style': 'red', 'width': 10, 'justify': 'right', 'priority': 1},
+                {'name': 'Accounts', 'style': 'black', 'width': 10, 'justify': 'right', 'priority': 1},
+                {'name': 'Avg Risk', 'style': 'black', 'width': 10, 'justify': 'right', 'priority': 1},
+            ]
+            
+            table = CLIHelpers.create_table(columns)
+            
+            for d in domains[:15]:
+                table.add_row(
+                    CLIHelpers.truncate(d['domain'], 23),
+                    str(d['affiliates']),
+                    str(d['accounts']),
+                    f"{d['avg_risk']:.0f}"
+                )
+            
+            console.print(table)
+        else:
+            console.print("\n[dim]No cross-affiliate domain patterns found[/dim]")
+        
+        # Cross-affiliate IPs
+        ips = patterns.get('cross_affiliate_ips', [])
+        if ips:
+            console.print("\n[bold]IPs Used by Multiple Affiliates:[/bold]")
+            console.print("[dim]Same IP sending traffic through different affiliates[/dim]\n")
+            
+            columns = [
+                {'name': 'IP Address', 'style': 'blue', 'width': 18, 'priority': 1},
+                {'name': 'Affiliates', 'style': 'red', 'width': 10, 'justify': 'right', 'priority': 1},
+                {'name': 'Accounts', 'style': 'black', 'width': 10, 'justify': 'right', 'priority': 1},
+            ]
+            
+            table = CLIHelpers.create_table(columns)
+            
+            for ip in ips[:15]:
+                table.add_row(
+                    str(ip['ip']),
+                    str(ip['affiliates']),
+                    str(ip['accounts'])
+                )
+            
+            console.print(table)
+        else:
+            console.print("\n[dim]No cross-affiliate IP patterns found[/dim]")
+        
+        CLIHelpers.wait_for_input()
+    
+    def _export_affiliate_report(self):
+        """Export affiliate fraud report to CSV"""
+        df = self.db.get_affiliate_fraud_stats()
+        
+        if df.empty:
+            CLIHelpers.show_warning("No affiliate data to export")
+            CLIHelpers.wait_for_input()
+            return
+        
+        from pathlib import Path
+        reports_dir = Path("reports")
+        reports_dir.mkdir(exist_ok=True)
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = reports_dir / f"affiliate_fraud_report_{timestamp}.csv"
+        
+        df.to_csv(filename, index=False)
+        CLIHelpers.show_success(f"Exported to {filename}")
+        CLIHelpers.wait_for_input()
     
     def temporal_analysis(self):
         """Temporal analysis - imported from original CLI"""

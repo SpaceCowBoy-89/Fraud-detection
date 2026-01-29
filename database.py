@@ -184,6 +184,32 @@ class Database:
         conn.close()
         logger.info(f"Database setup complete: {self.db_path}")
 
+    def _get_field(self, record, *field_names, default=None):
+        """
+        Get field value trying multiple possible field names.
+        Handles API responses with different naming conventions.
+        """
+        for name in field_names:
+            if name in record and record[name] is not None:
+                return record[name]
+        return default
+    
+    def _get_float(self, record, *field_names, default=0):
+        """Get field as float, trying multiple names"""
+        value = self._get_field(record, *field_names, default=default)
+        try:
+            return float(value) if value else default
+        except (ValueError, TypeError):
+            return default
+    
+    def _get_int(self, record, *field_names, default=0):
+        """Get field as int, trying multiple names"""
+        value = self._get_field(record, *field_names, default=default)
+        try:
+            return int(value) if value else default
+        except (ValueError, TypeError):
+            return default
+
     def insert_paid_records(self, records):
         """Insert paid transaction records"""
         conn = sqlite3.connect(self.db_path)
@@ -205,35 +231,45 @@ class Database:
                 if i == 0:
                     logger.info(f"First record keys: {list(record.keys())}")
 
+                # Get DUID - try multiple field names
+                duid = self._get_field(record, 'duid', 'DUID', 'Duid')
+                if not duid:
+                    logger.warning(f"Record {i} has no DUID, skipping")
+                    errors += 1
+                    continue
+
                 c.execute('''INSERT INTO paid (
                     duid, email, trans_datetime, campaign, ad_id, sale_amount,
                     payout_amount, first_name, last_name, zip, ip, geo_country,
                     custom_u1, custom_http_user_agent, proc_name,
                     processor_subscriber_id, credit_count, credit_amount,
-                    chargeback_count, chargeback_amount, ref_url
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                    chargeback_count, chargeback_amount, ref_url,
+                    webmaster_code, webmaster_id
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
                 (
-                    record.get('DUID'),
-                    record.get('Email'),
-                    record.get('Transaction Date Time'),
-                    record.get('Campaign'),
-                    record.get('Ad ID'),
-                    float(record.get('Sale Amount', 0) or 0),
-                    float(record.get('Payout Amount', 0) or 0),
-                    record.get('First Name'),
-                    record.get('Last Name'),
-                    record.get('Zip'),
-                    record.get('IP Address'),
-                    record.get('Geo Country'),
-                    record.get('User1 (user1)'),
-                    record.get('HTTP User Agent'),
-                    record.get('Processor Name'),
-                    record.get('Processor Subscriber ID'),
-                    int(record.get('Credit Count', 0) or 0),
-                    float(record.get('Credit Amount', 0) or 0),
-                    int(record.get('Chargeback Count', 0) or 0),
-                    float(record.get('Chargeback Amount', 0) or 0),
-                    record.get('Referer')
+                    duid,
+                    self._get_field(record, 'email', 'Email'),
+                    self._get_field(record, 'trans_datetime', 'Transaction Date Time', 'trans_date'),
+                    self._get_field(record, 'campaign', 'Campaign'),
+                    self._get_field(record, 'ad', 'ad_id', 'Ad ID'),
+                    self._get_float(record, 'sale_amt', 'Sale Amount'),
+                    self._get_float(record, 'payout', 'payout_amount', 'Payout Amount'),
+                    self._get_field(record, 'first_name', 'First Name'),
+                    self._get_field(record, 'last_name', 'Last Name'),
+                    self._get_field(record, 'zip', 'Zip'),
+                    self._get_field(record, 'ip', 'IP Address'),
+                    self._get_field(record, 'geo_country_code', 'Geo Country'),
+                    self._get_field(record, 'user1', 'User1 (user1)', 'custom_u1'),
+                    self._get_field(record, 'CUSTOM_http_user_agent', 'HTTP User Agent'),
+                    self._get_field(record, 'proc_name', 'Processor Name'),
+                    self._get_field(record, 'proc_subscriber_id', 'Processor Subscriber ID'),
+                    self._get_int(record, 'credit_count', 'Credit Count'),
+                    self._get_float(record, 'credit_amount', 'Credit Amount'),
+                    self._get_int(record, 'chargeback_count', 'Chargeback Count'),
+                    self._get_float(record, 'chargeback_amount', 'Chargeback Amount'),
+                    self._get_field(record, 'ref_url', 'Referer'),
+                    self._get_field(record, 'webmaster_code', 'Webmaster Code'),
+                    self._get_field(record, 'webmaster_id', 'Webmaster ID')
                 ))
                 inserted += 1
             except sqlite3.IntegrityError:
@@ -272,28 +308,45 @@ class Database:
                 if i == 0:
                     logger.info(f"First record keys: {list(record.keys())}")
 
+                # Get DUID - try multiple field names
+                duid = self._get_field(record, 'duid', 'DUID', 'Duid')
+                if not duid:
+                    logger.warning(f"Record {i} has no DUID, skipping")
+                    errors += 1
+                    continue
+
+                # Handle POV verified - can be various formats
+                pov_verified = self._get_field(record, 'pov_verified', 'POV Verified', default=0)
+                if isinstance(pov_verified, str):
+                    pov_verified = pov_verified.lower() in ('1', 'true', 'yes')
+                else:
+                    pov_verified = bool(pov_verified)
+
                 c.execute('''INSERT INTO free (
                     duid, email, username, site_code, tour_code, campaign, ad_id,
                     trans_datetime, ip, geo_country, user1, payout_amount,
-                    custom_http_user_agent, pov_verified, pov_verified_time, ref_url
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                    custom_http_user_agent, pov_verified, pov_verified_time, ref_url,
+                    webmaster_code, webmaster_id
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
                 (
-                    record.get('DUID'),
-                    record.get('Email'),
-                    record.get('Username'),
-                    record.get('Site Code'),
-                    record.get('Tour Code'),
-                    record.get('Campaign'),
-                    record.get('Ad ID'),
-                    record.get('Transaction Date Time'),
-                    record.get('IP Address'),
-                    record.get('Geo Country'),
-                    record.get('User1 (user1)'),
-                    float(record.get('Payout Amount', 0) or 0),
-                    record.get('HTTP User Agent'),
-                    bool(record.get('POV Verified', 0)),
-                    record.get('POV Verified Time'),
-                    record.get('Referer')
+                    duid,
+                    self._get_field(record, 'email', 'Email'),
+                    self._get_field(record, 'username', 'Username'),
+                    self._get_field(record, 'site_code', 'Site Code'),
+                    self._get_field(record, 'tour_code', 'Tour Code'),
+                    self._get_field(record, 'campaign', 'Campaign'),
+                    self._get_field(record, 'ad', 'ad_id', 'Ad ID'),
+                    self._get_field(record, 'trans_datetime', 'Transaction Date Time', 'trans_date'),
+                    self._get_field(record, 'ip', 'IP Address'),
+                    self._get_field(record, 'geo_country_code', 'Geo Country'),
+                    self._get_field(record, 'user1', 'User1 (user1)', 'custom_u1'),
+                    self._get_float(record, 'payout', 'payout_amount', 'Payout Amount'),
+                    self._get_field(record, 'CUSTOM_http_user_agent', 'HTTP User Agent'),
+                    pov_verified,
+                    self._get_field(record, 'pov_verified_time', 'POV Verified Time'),
+                    self._get_field(record, 'ref_url', 'Referer'),
+                    self._get_field(record, 'webmaster_code', 'Webmaster Code'),
+                    self._get_field(record, 'webmaster_id', 'Webmaster ID')
                 ))
                 inserted += 1
             except sqlite3.IntegrityError:
@@ -356,8 +409,9 @@ class Database:
             for result in results:
                 try:
                     c.execute('''INSERT OR REPLACE INTO fraud_results (
-                        duid, email, risk_score, flags, details, payout_amount, data_type
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?)''',
+                        duid, email, risk_score, flags, details, payout_amount, data_type,
+                        webmaster_code, campaign
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)''',
                     (
                         result['DUID'],
                         result['email'],
@@ -365,7 +419,9 @@ class Database:
                         str(result['flags']),
                         str(result['details']),
                         result.get('payout_amount', 0),
-                        result.get('data_type', 'unknown')
+                        result.get('data_type', 'unknown'),
+                        result.get('webmaster_code'),
+                        result.get('campaign')
                     ))
                 except Exception as e:
                     logger.error(f"Error saving fraud result for {result.get('DUID')}: {e}")
@@ -400,6 +456,154 @@ class Database:
             stats['last_analysis'] = c.fetchone()[0]
 
         return stats
+
+    def get_affiliate_fraud_stats(self, min_risk=25):
+        """
+        Get fraud statistics grouped by affiliate (webmaster_code).
+        
+        Args:
+            min_risk: Minimum risk score to consider (default 25 for medium+)
+        
+        Returns:
+            pandas DataFrame with affiliate fraud stats
+        """
+        import pandas as pd
+        
+        query = """
+        SELECT 
+            webmaster_code,
+            COUNT(*) as total_accounts,
+            SUM(CASE WHEN risk_score >= 50 THEN 1 ELSE 0 END) as high_risk_count,
+            SUM(CASE WHEN risk_score >= 25 AND risk_score < 50 THEN 1 ELSE 0 END) as medium_risk_count,
+            SUM(CASE WHEN risk_score < 25 THEN 1 ELSE 0 END) as low_risk_count,
+            ROUND(AVG(risk_score), 1) as avg_risk_score,
+            SUM(payout_amount) as total_payout,
+            SUM(CASE WHEN risk_score >= 50 THEN payout_amount ELSE 0 END) as high_risk_payout,
+            ROUND(SUM(CASE WHEN risk_score >= 50 THEN 1.0 ELSE 0 END) * 100.0 / COUNT(*), 1) as high_risk_pct
+        FROM fraud_results
+        WHERE webmaster_code IS NOT NULL AND webmaster_code != ''
+        GROUP BY webmaster_code
+        ORDER BY high_risk_count DESC, total_payout DESC
+        """
+        
+        with self.get_connection() as conn:
+            df = pd.read_sql_query(query, conn)
+        
+        return df
+
+    def get_affiliate_comparison(self, webmaster_codes=None):
+        """
+        Compare fraud patterns across affiliates.
+        
+        Args:
+            webmaster_codes: List of specific affiliates to compare (None for all)
+        
+        Returns:
+            dict with comparison data
+        """
+        with self.get_connection() as conn:
+            c = conn.cursor()
+            
+            # Overall stats for comparison
+            c.execute("""
+                SELECT 
+                    COUNT(*) as total,
+                    AVG(risk_score) as avg_risk,
+                    SUM(CASE WHEN risk_score >= 50 THEN 1.0 ELSE 0 END) / COUNT(*) as high_risk_rate
+                FROM fraud_results
+            """)
+            row = c.fetchone()
+            overall = {
+                'total': row[0],
+                'avg_risk': row[1],
+                'high_risk_rate': row[2]
+            }
+            
+            return {'overall': overall}
+
+    def get_fraud_by_affiliate(self, webmaster_code, min_risk=None, limit=100):
+        """
+        Get fraud results for a specific affiliate.
+        
+        Args:
+            webmaster_code: The affiliate's webmaster code
+            min_risk: Minimum risk score filter
+            limit: Max records to return
+        
+        Returns:
+            pandas DataFrame with fraud results for this affiliate
+        """
+        import pandas as pd
+        
+        query = "SELECT * FROM fraud_results WHERE webmaster_code = ?"
+        params = [webmaster_code]
+        
+        if min_risk:
+            query += " AND risk_score >= ?"
+            params.append(min_risk)
+        
+        query += " ORDER BY risk_score DESC"
+        
+        if limit:
+            query += f" LIMIT {limit}"
+        
+        with self.get_connection() as conn:
+            df = pd.read_sql_query(query, conn, params=params)
+        
+        return df
+
+    def get_cross_affiliate_patterns(self):
+        """
+        Find patterns that appear across multiple affiliates (potential platform-wide fraud).
+        
+        Returns:
+            dict with cross-affiliate pattern analysis
+        """
+        patterns = {}
+        
+        with self.get_connection() as conn:
+            c = conn.cursor()
+            
+            # Find email domains appearing with multiple affiliates
+            c.execute("""
+                SELECT 
+                    SUBSTR(email, INSTR(email, '@') + 1) as domain,
+                    COUNT(DISTINCT webmaster_code) as affiliate_count,
+                    COUNT(*) as total_accounts,
+                    AVG(risk_score) as avg_risk
+                FROM fraud_results
+                WHERE webmaster_code IS NOT NULL AND email LIKE '%@%'
+                GROUP BY domain
+                HAVING affiliate_count > 1 AND avg_risk >= 25
+                ORDER BY affiliate_count DESC, avg_risk DESC
+                LIMIT 20
+            """)
+            
+            patterns['cross_affiliate_domains'] = [
+                {'domain': row[0], 'affiliates': row[1], 'accounts': row[2], 'avg_risk': row[3]}
+                for row in c.fetchall()
+            ]
+            
+            # Find IPs appearing with multiple affiliates (from source tables)
+            c.execute("""
+                SELECT 
+                    p.ip,
+                    COUNT(DISTINCT p.webmaster_code) as affiliate_count,
+                    COUNT(*) as total_accounts
+                FROM paid p
+                WHERE p.webmaster_code IS NOT NULL AND p.ip IS NOT NULL
+                GROUP BY p.ip
+                HAVING affiliate_count > 1 AND total_accounts > 2
+                ORDER BY affiliate_count DESC
+                LIMIT 20
+            """)
+            
+            patterns['cross_affiliate_ips'] = [
+                {'ip': row[0], 'affiliates': row[1], 'accounts': row[2]}
+                for row in c.fetchall()
+            ]
+        
+        return patterns
 
     def record_fetch(self, data_type, start_date, end_date, count):
         """Record a data fetch in history"""

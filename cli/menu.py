@@ -37,31 +37,32 @@ MENU_GROUPS = {
         'icon': '📊',
         'title': 'ADVANCED ANALYSIS',
         'items': [
-            {'key': '6', 'label': 'Temporal Analysis', 'method': 'temporal_analysis', 'shortcut': None, 'help': 'Analyze fraud trends over time'},
-            {'key': '7', 'label': 'Pattern Discovery', 'method': 'pattern_discovery', 'shortcut': None, 'help': 'Discover fraud patterns in data'},
-            {'key': '8', 'label': 'Cluster Analysis', 'method': 'cluster_analysis', 'shortcut': None, 'help': 'Find account clusters (IP, domain, geo)'},
-            {'key': '9', 'label': 'Anomaly Detection', 'method': 'ensemble_anomaly_detection', 'shortcut': None, 'help': 'ML-based anomaly detection'},
-            {'key': '10', 'label': 'Drift Monitoring', 'method': 'drift_monitoring', 'shortcut': None, 'help': 'Monitor for fraud pattern changes'},
-            {'key': '11', 'label': 'Billing Correlations', 'method': 'billing_correlation_analysis', 'shortcut': 'b', 'help': 'Find shared billing fraud rings'},
+            {'key': '6', 'label': 'Affiliate Analysis', 'method': 'affiliate_analysis', 'shortcut': 'w', 'help': 'Fraud by affiliate/webmaster'},
+            {'key': '7', 'label': 'Temporal Analysis', 'method': 'temporal_analysis', 'shortcut': None, 'help': 'Analyze fraud trends over time'},
+            {'key': '8', 'label': 'Pattern Discovery', 'method': 'pattern_discovery', 'shortcut': None, 'help': 'Discover fraud patterns in data'},
+            {'key': '9', 'label': 'Cluster Analysis', 'method': 'cluster_analysis', 'shortcut': None, 'help': 'Find account clusters (IP, domain, geo)'},
+            {'key': '10', 'label': 'Anomaly Detection', 'method': 'ensemble_anomaly_detection', 'shortcut': None, 'help': 'ML-based anomaly detection'},
+            {'key': '11', 'label': 'Drift Monitoring', 'method': 'drift_monitoring', 'shortcut': None, 'help': 'Monitor for fraud pattern changes'},
+            {'key': '12', 'label': 'Billing Correlations', 'method': 'billing_correlation_analysis', 'shortcut': 'b', 'help': 'Find shared billing fraud rings'},
         ]
     },
     'review': {
         'icon': '✅',
         'title': 'REVIEW & METRICS',
         'items': [
-            {'key': '12', 'label': 'Record Outcomes', 'method': 'review_outcomes', 'shortcut': 'o', 'help': 'Record fraud/false positive outcomes'},
-            {'key': '13', 'label': 'Effectiveness Dashboard', 'method': 'effectiveness_dashboard', 'shortcut': 'e', 'help': 'View detection effectiveness metrics'},
-            {'key': '14', 'label': 'Low-Risk Sampling', 'method': 'low_risk_sampling', 'shortcut': None, 'help': 'Sample low-risk accounts for review'},
+            {'key': '13', 'label': 'Record Outcomes', 'method': 'review_outcomes', 'shortcut': 'o', 'help': 'Record fraud/false positive outcomes'},
+            {'key': '14', 'label': 'Effectiveness Dashboard', 'method': 'effectiveness_dashboard', 'shortcut': 'e', 'help': 'View detection effectiveness metrics'},
+            {'key': '15', 'label': 'Low-Risk Sampling', 'method': 'low_risk_sampling', 'shortcut': None, 'help': 'Sample low-risk accounts for review'},
         ]
     },
     'system': {
         'icon': '⚙️',
         'title': 'SYSTEM',
         'items': [
-            {'key': '15', 'label': 'Dashboard Metrics', 'method': 'view_dashboard', 'shortcut': 'd', 'help': 'View summary dashboard'},
-            {'key': '16', 'label': 'Settings', 'method': 'configure_settings', 'shortcut': 's', 'help': 'Configure detection settings'},
-            {'key': '17', 'label': 'View Logs', 'method': 'view_logs', 'shortcut': 'l', 'help': 'View recent log entries'},
-            {'key': '18', 'label': 'Export Reports', 'method': 'export_reports', 'shortcut': None, 'help': 'Export data to CSV'},
+            {'key': '16', 'label': 'Dashboard Metrics', 'method': 'view_dashboard', 'shortcut': 'd', 'help': 'View summary dashboard'},
+            {'key': '17', 'label': 'Settings', 'method': 'configure_settings', 'shortcut': 's', 'help': 'Configure detection settings'},
+            {'key': '18', 'label': 'View Logs', 'method': 'view_logs', 'shortcut': 'l', 'help': 'View recent log entries'},
+            {'key': '19', 'label': 'Export Reports', 'method': 'export_reports', 'shortcut': None, 'help': 'Export data to CSV'},
         ]
     }
 }
@@ -282,6 +283,10 @@ def create_submenu_prompt(title, options, allow_back=True):
         valid_choices.extend(['b', 'B'])
     
     choice = CLIHelpers.prompt("Choice", choices=valid_choices)
+    
+    # Handle None or empty input
+    if not choice:
+        return 'back'
     
     if choice.lower() == 'b':
         return 'back'

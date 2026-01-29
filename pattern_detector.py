@@ -222,21 +222,28 @@ class AnomalyDetector:
             DataFrame with newly discovered potential fraud cases
         """
         import pandas as pd
+        import numpy as np
 
         if 'consensus' not in anomaly_results:
             logger.warning("No consensus results available")
             return pd.DataFrame()
 
         # Accounts with low rule-based risk but flagged by anomaly detectors
-        consensus_anomalies = anomaly_results['consensus']['predictions']
-        low_risk_by_rules = df['risk_score'] < risk_threshold
+        consensus_anomalies = anomaly_results['consensus']['predictions'].astype(bool)
+        low_risk_by_rules = (df['risk_score'] < risk_threshold).values
 
-        newly_discovered = df[consensus_anomalies & low_risk_by_rules].copy()
+        # Create mask for newly discovered (anomaly + low rule-based risk)
+        mask = consensus_anomalies & low_risk_by_rules
+        
+        # Reset index to ensure alignment
+        df_reset = df.reset_index(drop=True)
+        newly_discovered = df_reset[mask].copy()
 
-        # Add anomaly scores
+        # Add anomaly scores using the mask on the original array
         for name, result in anomaly_results.items():
-            if name != 'consensus':
-                newly_discovered[f'{name}_score'] = result['scores'][consensus_anomalies & low_risk_by_rules]
+            if name != 'consensus' and 'scores' in result:
+                scores = np.asarray(result['scores'])
+                newly_discovered[f'{name}_score'] = scores[mask]
 
         return newly_discovered
 

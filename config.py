@@ -9,20 +9,54 @@ DEFAULT_CONFIG = {
         'high': 50,
         'medium': 25
     },
-    'detection_weights': {
-        'excessive_dots': 25,
-        'digit_suffix': 20,
+    'risk_scores': {
+        # Email pattern scores
+        'excessive_dots': 20,
+        'digit_suffix': 15,
         'scrambled_pattern': 35,
         'name_number_pattern': 40,
-        'written_number': 25,
-        'repeated_word': 35,
+        'written_number_pattern': 15,
+        'repeated_word_pattern': 25,
         'suspicious_name': 30,
-        'domain_concentration': 30
+        'domain_concentration': 20,
+        
+        # POV timing scores
+        'pov_instant_20s': 50,
+        'pov_instant_40s': 40,
+        'pov_fast_60s': 30,
+        
+        # IP velocity scores
+        'ip_velocity_high': 30,
+        'ip_velocity_medium': 5,
+        
+        # Device scores
+        'desktop_windows_10': 20,
+        'desktop_other': 10,
+        
+        # Geographic clustering scores
+        'us_state_cluster': 25,
+        'us_city_state_cluster': 30,
+        'intl_country_city_cluster': 30,
+        
+        # Theme clustering
+        'theme_cluster': 15
+    },
+    'detection_weights': {
+        # Deprecated - use risk_scores instead
+        'excessive_dots': 20,
+        'digit_suffix': 15,
+        'scrambled_pattern': 35,
+        'name_number_pattern': 40,
+        'written_number': 15,
+        'repeated_word': 25,
+        'suspicious_name': 30,
+        'domain_concentration': 20
     },
     'ip_velocity_threshold': 10,
     'repeated_word_threshold': 3,
     'whitelisted_affiliates': [],
     'high_risk_countries': [],
+    'suspicious_names': ['fatima', 'muhammed'],
     'database_path': 'affiliate_data.db'
 }
 

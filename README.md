@@ -4,71 +4,108 @@ Automated fraud detection and prevention system for affiliate marketing programs
 
 ## Quick Start
 
-1. **Setup**:
-   ```bash
-   cd ~/fraud-detection
-   pip install pandas numpy
-   ```
+### Option 1: CLI Application (Recommended)
 
-2. **Place your data**:
-   - Export `Leads.csv` from affiliate tracking platform
-   - Place in `data/` directory
+```bash
+cd ~/fraud-detection
+pip install -r requirements.txt
+python cli_app.py
+```
 
-3. **Run analysis**:
-   ```bash
-   python scripts/email_fraud_detector.py
-   ```
+### Option 2: Direct Script Analysis
 
-4. **Review results**:
-   - Check `reports/email_fraud_report_HIGH_RISK.csv` for priority cases
-   - Full analysis in `reports/email_fraud_report.csv`
+```bash
+cd ~/fraud-detection
+pip install pandas numpy openpyxl
+python scripts/email_fraud_detector.py
+```
 
-## What It Detects
+Place CSV/Excel exports in `data/` directory, review results in `reports/`.
 
-The system automatically flags suspicious affiliate accounts based on:
+## Features
 
-- **Email patterns**: Excessive dots, digit suffixes, scrambled usernames
-- **Domain concentration**: Traffic clustering from suspicious domains
-- **Theme clustering**: Related email themes suggesting coordinated fraud
-- **Risk scoring**: 0-100 scale with actionable thresholds
+- **Rich CLI Interface** - Beautiful terminal UI with grouped menus and shortcuts
+- **API Integration** - Fetch data directly from affiliate tracking platforms
+- **Advanced Fraud Detection** - 15+ pattern detection algorithms
+- **Config-Driven Scoring** - Adjust all risk scores without code changes
+- **Outcome Tracking** - Record and learn from confirmed fraud cases
+- **Effectiveness Metrics** - Track detection precision over time
+- **Billing Correlation** - Detect shared payment fraud rings
+- **Unit Tests** - Comprehensive test coverage
 
 ## Project Structure
 
 ```
 fraud-detection/
-├── scripts/          # Python fraud detection scripts
-├── data/            # CSV exports (not committed to git)
-├── reports/         # Generated analysis reports
-├── docs/            # Additional documentation
-├── CLAUDE.md        # Detailed guide for Claude Code
-└── README.md        # This file
+├── cli_app.py           # CLI application (v3.0)
+├── cli/                 # CLI modules
+│   ├── helpers.py       # UI utilities
+│   └── menu.py          # Menu system
+├── scripts/
+│   └── email_fraud_detector.py  # Detection engine
+├── tests/               # Unit tests
+├── data/                # CSV exports (gitignored)
+├── reports/             # Generated reports
+├── config.json          # Configuration (created on first run)
+├── CLAUDE.md            # AI assistant guide
+└── README_CLI.md        # Detailed CLI documentation
 ```
 
-## Fraud Patterns Detected
+## What It Detects
 
-### High Priority
-- **Email validation timing** (< 60 seconds after account creation)
-- **Domain concentration** (>90% from same non-major provider)
-- **Scrambled emails** (random character patterns)
+### Email Patterns
+- Name-number patterns (john43murphy5398@gmail.com)
+- Excessive dots (a.b.c.d.e@domain.com)
+- Digit suffixes (user12345@domain.com)
+- Scrambled usernames (xkjhgfds@domain.com)
+- Written numbers (emillythree@domain.com)
+- Suspicious names (from configurable list)
 
-### Medium Priority
-- **Email patterns** (multiple dots, digit suffixes)
-- **Theme clustering** (real estate, construction, crypto, finance)
+### Behavioral Signals
+- POV validation timing (< 60 seconds = fraud indicator)
+- Desktop vs mobile (90% of legit users are mobile)
+- IP velocity (many signups from same IP)
+- Geographic clustering
 
-## Future Enhancements
+### Billing Correlations
+- Same card across multiple accounts
+- Same billing name variations
+- IP addresses with multiple cards
 
-- Cross-reference Leads and Sales data
-- Geolocation mismatch detection
-- Payment card clustering analysis
-- Real-time API integration (currently uses CSV exports)
+## Risk Scoring
+
+All scores are configurable in `config.json`:
+
+| Pattern | Default Score |
+|---------|---------------|
+| Name-number pattern | 40 |
+| POV instant (≤20s) | 50 |
+| POV fast (≤40s) | 40 |
+| Scrambled pattern | 35 |
+| Suspicious name | 30 |
+| Desktop Windows 10 | 20 |
+| Excessive dots | 20 |
+| Digit suffix | 15 |
+
+**Risk Levels:**
+- 🔴 High Risk: ≥50 points
+- 🟡 Medium Risk: 25-49 points
+- 🟢 Low Risk: <25 points
 
 ## Documentation
 
-See `CLAUDE.md` for comprehensive documentation including:
-- Complete fraud pattern catalog
-- Data source details
-- API integration roadmap
-- Customization guide
+| File | Description |
+|------|-------------|
+| `README_CLI.md` | Full CLI documentation with all features |
+| `CLAUDE.md` | AI assistant context and fraud patterns |
+| `RISK_SCORES.md` | Detailed risk score explanations |
+| `ADVANCED_FEATURES_GUIDE.md` | ML and advanced analytics |
+
+## Running Tests
+
+```bash
+python -m pytest tests/ -v
+```
 
 ## Support
 

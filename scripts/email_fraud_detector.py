@@ -7,9 +7,24 @@ import os
 import sys
 import glob
 from pathlib import Path
+import json
+import time
+import requests
 
 class EmailFraudDetector:
-    def __init__(self):
+    def __init__(self, config=None):
+        """
+        Initialize the fraud detector.
+        
+        Args:
+            config: Optional Config object for reading risk scores.
+                    If not provided, uses default values.
+        """
+        self.config = config
+        
+        # Load risk scores from config or use defaults
+        self.risk_scores = self._load_risk_scores()
+        
         # Major email providers to whitelist for domain concentration
         self.major_providers = [
             'gmail.com', 'yahoo.com', 'outlook.com', 'hotmail.com',
@@ -24,14 +39,66 @@ class EmailFraudDetector:
             'finance': ['finance', 'invest', 'capital', 'trading', 'forex']
         }
 
-        # Suspicious names that appear frequently in fraud patterns (hardcoded)
-        self.suspicious_names = ['fatima', 'muhammed']
+        # Suspicious names - load from config or use defaults
+        self.suspicious_names = self._get_config('suspicious_names', ['fatima', 'muhammed'])
 
         # Will be populated dynamically from the dataset
         self.repeated_words = {}
         self.repeated_patterns = {}
         self.ip_velocity_flags = {}  # IPs with suspicious signup velocity
         self.device_distribution = {'mobile': 0, 'desktop': 0, 'unknown': 0}  # Track device types
+        
+        # IP geolocation cache and settings
+        self.ip_geolocation_cache = {}
+        self.ip_geolocation_enabled = True
+        self.ip_api_last_call = 0
+        self.ip_api_rate_limit = 0.5  # seconds between API calls (free tier limit)
+        
+        # Geographic clustering flags (populated by build_geographic_cluster_maps)
+        self.us_state_cluster_flags = set()  # States with 3+ accounts
+        self.us_city_state_cluster_flags = set()  # City+State combinations with 3+ accounts
+        self.intl_country_city_cluster_flags = set()  # Country+City combinations with 3+ accounts (non-US)
+    
+    def _get_config(self, key, default=None):
+        """Get value from config or return default"""
+        if self.config:
+            return self.config.get(key, default)
+        return default
+    
+    def _load_risk_scores(self):
+        """Load risk scores from config or use defaults"""
+        defaults = {
+            'excessive_dots': 20,
+            'digit_suffix': 15,
+            'scrambled_pattern': 35,
+            'name_number_pattern': 40,
+            'written_number_pattern': 15,
+            'repeated_word_pattern': 25,
+            'suspicious_name': 30,
+            'domain_concentration': 20,
+            'pov_instant_20s': 50,
+            'pov_instant_40s': 40,
+            'pov_fast_60s': 30,
+            'ip_velocity_high': 30,
+            'ip_velocity_medium': 5,
+            'desktop_windows_10': 20,
+            'desktop_other': 10,
+            'us_state_cluster': 25,
+            'us_city_state_cluster': 30,
+            'intl_country_city_cluster': 30,
+            'theme_cluster': 15
+        }
+        
+        if self.config:
+            config_scores = self.config.get('risk_scores', {})
+            # Merge with defaults (config takes precedence)
+            return {**defaults, **config_scores}
+        
+        return defaults
+    
+    def get_risk_score(self, key):
+        """Get a specific risk score value"""
+        return self.risk_scores.get(key, 0)
 
     def detect_device_type(self, user_agent):
         """
@@ -60,6 +127,117 @@ class EmailFraudDetector:
             return 'desktop'
 
         return 'unknown'
+
+    def get_ip_geolocation(self, ip_address):
+        """
+        Get geolocation data for an IP address using ip-api.com (free tier).
+        
+        Args:
+            ip_address: IP address to look up
+            
+        Returns:
+            dict with keys: country_code, country, region, city, or None if lookup fails
+        """
+        if not ip_address or pd.isna(ip_address) or not self.ip_geolocation_enabled:
+            return None
+        
+        ip_str = str(ip_address).strip()
+        
+        # Check cache first
+        if ip_str in self.ip_geolocation_cache:
+            return self.ip_geolocation_cache[ip_str]
+        
+        # Rate limiting for free tier (45 requests per minute)
+        elapsed = time.time() - self.ip_api_last_call
+        if elapsed < self.ip_api_rate_limit:
+            time.sleep(self.ip_api_rate_limit - elapsed)
+        
+        try:
+            # ip-api.com free tier (no API key needed)
+            response = requests.get(
+                f'http://ip-api.com/json/{ip_str}',
+                params={'fields': 'status,countryCode,country,regionName,city'},
+                timeout=5
+            )
+            self.ip_api_last_call = time.time()
+            
+            if response.status_code == 200:
+                data = response.json()
+                if data.get('status') == 'success':
+                    result = {
+                        'country_code': data.get('countryCode'),
+                        'country': data.get('country'),
+                        'region': data.get('regionName'),  # State/province
+                        'city': data.get('city')
+                    }
+                    self.ip_geolocation_cache[ip_str] = result
+                    return result
+            
+            # Cache failed lookups as None to avoid repeated API calls
+            self.ip_geolocation_cache[ip_str] = None
+            return None
+            
+        except Exception as e:
+            # Silently fail - geolocation is optional
+            self.ip_geolocation_cache[ip_str] = None
+            return None
+
+    def build_geographic_cluster_maps(self, df):
+        """
+        Build maps of geographic clusters for fraud detection.
+        Identifies locations with multiple accounts (potential fraud rings).
+        
+        Args:
+            df: DataFrame with IP addresses
+        """
+        ip_col = self.column_map.get('ip')
+        if not ip_col:
+            return
+        
+        print("Building geographic cluster maps (this may take a moment)...")
+        
+        # Track geographic occurrences
+        us_state_counts = Counter()  # state -> count
+        us_city_state_counts = Counter()  # (city, state) -> count
+        intl_country_city_counts = Counter()  # (city, country_code) -> count
+        
+        # Get unique IPs to minimize API calls
+        unique_ips = df[ip_col].dropna().unique()
+        
+        for ip in unique_ips:
+            geo = self.get_ip_geolocation(ip)
+            if not geo:
+                continue
+            
+            country_code = geo.get('country_code')
+            region = geo.get('region')  # State/province
+            city = geo.get('city')
+            
+            if country_code == 'US' and region:
+                us_state_counts[region] += 1
+                if city:
+                    us_city_state_counts[(city, region)] += 1
+            elif country_code and country_code != 'US' and city:
+                intl_country_city_counts[(city, country_code)] += 1
+        
+        # Flag locations with 3+ accounts as suspicious clusters
+        threshold = 3
+        
+        for state, count in us_state_counts.items():
+            if count >= threshold:
+                self.us_state_cluster_flags.add(f"{state},US")
+        
+        for (city, state), count in us_city_state_counts.items():
+            if count >= threshold:
+                self.us_city_state_cluster_flags.add(f"{city},{state},US")
+        
+        for (city, country_code), count in intl_country_city_counts.items():
+            if count >= threshold:
+                self.intl_country_city_cluster_flags.add(f"{city},{country_code}")
+        
+        print(f"  Found {len(self.us_state_cluster_flags)} US state clusters")
+        print(f"  Found {len(self.us_city_state_cluster_flags)} US city/state clusters")
+        print(f"  Found {len(self.intl_country_city_cluster_flags)} international city clusters")
 
     def normalize_column_names(self, df):
         """Normalize column names to handle different capitalizations"""
@@ -229,21 +407,21 @@ class EmailFraudDetector:
         # 1. Multiple Dots Pattern (>3 dots)
         dot_count = username.count('.')
         if dot_count > 3:
-            risk_score += 25
+            risk_score += self.get_risk_score('excessive_dots')
             flags.append('EXCESSIVE_DOTS')
             details['dot_count'] = dot_count
 
         # 2. Digit Suffix Pattern (4-5 digits at end)
         digit_suffix = re.search(r'(\d{4,5})$', username)
         if digit_suffix:
-            risk_score += 20
+            risk_score += self.get_risk_score('digit_suffix')
             flags.append('DIGIT_SUFFIX')
             details['digit_suffix'] = digit_suffix.group(1)
 
         # 3. Scrambled/Random Pattern - Advanced detection
         is_scrambled_result, scrambled_indicators = self.is_scrambled(username)
         if is_scrambled_result:
-            risk_score += 35
+            risk_score += self.get_risk_score('scrambled_pattern')
             flags.append('SCRAMBLED_PATTERN')
             details['scrambled_indicators'] = scrambled_indicators
 
@@ -251,7 +429,7 @@ class EmailFraudDetector:
         # Detects patterns like: firstname12lastname4567@domain
         name_num_pattern = re.search(r'^([a-z]+)(\d+)([a-z]+)(\d+)', username)
         if name_num_pattern:
-            risk_score += 40
+            risk_score += self.get_risk_score('name_number_pattern')
             flags.append('NAME_NUMBER_PATTERN')
             details['pattern_structure'] = f"{name_num_pattern.group(1)}-{name_num_pattern.group(2)}-{name_num_pattern.group(3)}-{name_num_pattern.group(4)}"
 
@@ -263,7 +441,7 @@ class EmailFraudDetector:
                 suspicious_found.append(name)
 
         if suspicious_found:
-            risk_score += 30
+            risk_score += self.get_risk_score('suspicious_name')
             flags.append('SUSPICIOUS_NAME')
             details['suspicious_names'] = suspicious_found
 
@@ -274,7 +452,7 @@ class EmailFraudDetector:
 
         if has_number_word:
             # This pattern is suspicious when combined with a name
-            risk_score += 25
+            risk_score += self.get_risk_score('written_number_pattern')
             flags.append('WRITTEN_NUMBER_PATTERN')
             details['written_numbers'] = [nw for nw in number_words if nw in username]
 
@@ -287,7 +465,7 @@ class EmailFraudDetector:
                 repeated_words_found.append(f"{word}({self.repeated_words[word]}x)")
 
         if repeated_words_found:
-            risk_score += 35
+            risk_score += self.get_risk_score('repeated_word_pattern')
             flags.append('REPEATED_WORD_PATTERN')
             details['repeated_words'] = repeated_words_found
 
@@ -324,16 +502,21 @@ class EmailFraudDetector:
                 details['pov_validation_seconds'] = int(validation_seconds)
 
                 # Apply risk scoring based on validation speed
-                if validation_seconds <= 40:
-                    # HUGE RED FLAG - Nearly instant validation
-                    risk_score += 50
-                    flags.append('POV_INSTANT_VALIDATION_40S')
+                if validation_seconds <= 20:
+                    # CRITICAL - Instant validation (likely automated)
+                    risk_score += self.get_risk_score('pov_instant_20s')
+                    flags.append('POV_INSTANT_VALIDATION_20S')
                     details['pov_risk_level'] = 'CRITICAL'
-                elif validation_seconds <= 60:
-                    # MEDIUM RED FLAG - Very fast validation
-                    risk_score += 30
-                    flags.append('POV_FAST_VALIDATION_60S')
+                elif validation_seconds <= 40:
+                    # HIGH - Very fast validation
+                    risk_score += self.get_risk_score('pov_instant_40s')
+                    flags.append('POV_INSTANT_VALIDATION_40S')
                     details['pov_risk_level'] = 'HIGH'
+                elif validation_seconds <= 60:
+                    # MEDIUM - Fast validation
+                    risk_score += self.get_risk_score('pov_fast_60s')
+                    flags.append('POV_FAST_VALIDATION_60S')
+                    details['pov_risk_level'] = 'MEDIUM'
                 else:
                     # Normal validation time
                     details['pov_risk_level'] = 'NORMAL'
@@ -346,7 +529,10 @@ class EmailFraudDetector:
         # Check if this IP has suspicious signup velocity
         if ip_address and ip_address in self.ip_velocity_flags:
             ip_data = self.ip_velocity_flags[ip_address]
-            risk_score += 40 if ip_data['risk_level'] == 'HIGH' else 25
+            if ip_data['risk_level'] == 'HIGH':
+                risk_score += self.get_risk_score('ip_velocity_high')
+            else:
+                risk_score += self.get_risk_score('ip_velocity_medium')
             flags.append(f"IP_VELOCITY_{ip_data['risk_level']}")
             details['ip_velocity'] = ip_data
 
@@ -360,10 +546,54 @@ class EmailFraudDetector:
             self.device_distribution[device_type] += 1
 
             # Desktop devices are suspicious (legitimate users are 90% mobile)
+            # Windows 10 is more suspicious (commonly used in fraud farms)
             if device_type == 'desktop':
-                risk_score += 30
-                flags.append('DESKTOP_DEVICE_SUSPICIOUS')
-                details['device_risk'] = 'Legitimate users are 90% mobile'
+                is_windows_10 = 'windows nt 10' in str(user_agent).lower()
+                if is_windows_10:
+                    risk_score += self.get_risk_score('desktop_windows_10')
+                    flags.append('DESKTOP_DEVICE_SUSPICIOUS')
+                    details['device_risk'] = 'Windows 10 desktop - common in fraud farms'
+                else:
+                    risk_score += self.get_risk_score('desktop_other')
+                    flags.append('DESKTOP_DEVICE_SUSPICIOUS')
+                    details['device_risk'] = 'Non-Windows 10 desktop'
+
+        # 11. Geographic Clustering Analysis
+        # Check if this IP's location is in a known cluster (potential fraud ring)
+        if ip_address:
+            geo = self.get_ip_geolocation(ip_address)
+            if geo:
+                country_code = geo.get('country_code')
+                region = geo.get('region')  # State/province
+                city = geo.get('city')
+                
+                details['geo_country'] = country_code
+                details['geo_region'] = region
+                details['geo_city'] = city
+                
+                # US State Clustering
+                if country_code == 'US' and region:
+                    state_key = f"{region},US"
+                    if state_key in self.us_state_cluster_flags:
+                        risk_score += self.get_risk_score('us_state_cluster')
+                        flags.append('SAME_US_STATE_CLUSTER')
+                        details['geo_cluster'] = f"Multiple accounts from {region}"
+                
+                # US City/State Clustering
+                if country_code == 'US' and city and region:
+                    city_state_key = f"{city},{region},US"
+                    if city_state_key in self.us_city_state_cluster_flags:
+                        risk_score += self.get_risk_score('us_city_state_cluster')
+                        flags.append('SAME_US_CITY_STATE_CLUSTER')
+                        details['geo_cluster'] = f"Multiple accounts from {city}, {region}"
+                
+                # International Country+City Clustering
+                if country_code and country_code != 'US' and city:
+                    country_city_key = f"{city},{country_code}"
+                    if country_city_key in self.intl_country_city_cluster_flags:
+                        risk_score += self.get_risk_score('intl_country_city_cluster')
+                        flags.append('SAME_INTL_COUNTRY_CITY_CLUSTER')
+                        details['geo_cluster'] = f"Multiple accounts from {city}, {country_code}"
 
         return {
             'email': email,

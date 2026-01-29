@@ -4,8 +4,11 @@ A comprehensive command-line interface for detecting fraud in affiliate marketin
 
 ## Features
 
-✅ **Rich CLI Interface** - Beautiful terminal UI with colors, progress bars, and emojis
-✅ **API Integration** - Fetch data directly from affiliate tracking API
+✅ **Rich CLI Interface** - Beautiful terminal UI with colors, progress bars, and responsive layouts  
+✅ **Grouped Menu Structure** - Logical organization (Data, Detection, Analysis, Review, System)  
+✅ **Quick Shortcuts** - Single-letter shortcuts for power users (`f`, `r`, `v`, `a`, etc.)  
+✅ **Help System** - Press `h` or `?` anytime for help  
+✅ **API Integration** - Fetch data directly from affiliate tracking API  
 ✅ **Advanced Fraud Detection** - Multiple pattern detection algorithms:
    - Name-number patterns (e.g., john43murphy5398@gmail.com)
    - Repeated word patterns (dynamic detection)
@@ -13,12 +16,15 @@ A comprehensive command-line interface for detecting fraud in affiliate marketin
    - Written number patterns (e.g., emillytwo@gmail.com)
    - Suspicious name detection
    - Domain concentration analysis
+   - POV validation timing
+   - Device type analysis
+   - Geographic clustering
 
-✅ **Database Storage** - SQLite database with proper indexing
-✅ **Flexible Filtering** - Filter by POV verified, user agent, chargeback count, credit count, site code, and more
-✅ **Incremental Updates** - Fetch only new data since last sync
-✅ **Reporting & Alerts** - High-risk account alerts and detailed reports
-✅ **Configuration Management** - Customizable risk thresholds and detection weights
+✅ **Config-Driven Risk Scores** - Adjust all scores in `config.json` without code changes  
+✅ **Outcome Tracking** - Record confirmed fraud / false positives  
+✅ **Effectiveness Metrics** - Track detection precision over time  
+✅ **Database Storage** - SQLite database with proper indexing  
+✅ **Unit Tests** - Comprehensive test coverage  
 
 ## Installation
 
@@ -34,10 +40,10 @@ pip install -r requirements.txt
 First time setup:
 
 ```bash
-python3 cli_fraud_detection.py
+python3 cli_app.py
 ```
 
-Navigate to **Settings (Option 4)** → **Set API Key (Option 1)**
+Navigate to **System → Settings** and set your API key.
 
 Or set as environment variable:
 ```bash
@@ -49,66 +55,70 @@ export FRAUD_DETECTION_API_KEY="your_api_key_here"
 ### Start the CLI
 
 ```bash
+# Recommended - New modular CLI (v3.0)
+python3 cli_app.py
+
+# Legacy CLI (still works)
 python3 cli_fraud_detection.py
 ```
 
-### Main Menu Options
+### Menu Structure
 
 ```
-1. 🔄 Fetch New Data from API
-   - Fetch leads (free signups) or sales (paid transactions)
-   - Select date range (7 days, 30 days, custom, or incremental)
-   - Apply optional filters:
-     * POV Verified status
-     * Site Code
-     * User Agent
-     * Chargeback Count
-     * Credit Count
-     * Webmaster Code
-     * Email Domain
-     * Campaign
+📥 DATA
+    1. Fetch New Data (f)
 
-2. 🔍 Run Fraud Detection Analysis
-   - Analyze new data only or re-analyze everything
-   - Automatically detects patterns across all emails
-   - Saves results to database
+🔍 DETECTION
+    2. Run Fraud Analysis (r)
+    3. View Reports (v)
+    4. High-Risk Alerts (a)
+    5. Test Single Email (t)
 
-3. 📈 View Fraud Detection Reports
-   - See risk distribution (High/Medium/Low)
-   - View total payouts at risk
-   - Export to CSV
+📊 ADVANCED ANALYSIS
+    6. Temporal Analysis
+    7. Pattern Discovery
+    8. Cluster Analysis
+    9. Anomaly Detection
+   10. Drift Monitoring
+   11. Billing Correlations (b)
 
-4. ⚙️  Configure Settings
-   - Set/update API key
-   - Adjust risk thresholds
-   - Modify detection weights
-   - Manage whitelisted affiliates
+✅ REVIEW & METRICS
+   12. Record Outcomes (o)
+   13. Effectiveness Dashboard (e)
+   14. Low-Risk Sampling
 
-5. 📊 View Dashboard Metrics
-   - Total accounts analyzed
-   - Fraud detection rate
-   - Revenue at risk
-   - Latest statistics
+⚙️ SYSTEM
+   15. Dashboard Metrics (d)
+   16. Settings (s)
+   17. View Logs (l)
+   18. Export Reports
 
-6. 🚨 Check High-Risk Alerts
-   - View top 10 high-risk accounts
-   - Quick access to flagged emails
-   - Sorted by risk score
-
-7. 📁 Export Reports
-   - Export to CSV, Excel
-   - Automatic file naming based on date
-
-8. 🧪 Test Mode (Analyze Single Email)
-   - Test fraud detection on any email
-   - Instant risk score and flag analysis
-   - Perfect for validating new patterns
-
-9. 📖 View Logs
-   - Recent activity logs
-   - Error tracking
-   - API request history
+    0. Exit
 ```
+
+### Quick Shortcuts
+
+| Key | Action |
+|-----|--------|
+| `f` | Fetch new data |
+| `r` | Run fraud analysis |
+| `v` | View reports |
+| `a` | High-risk alerts |
+| `t` | Test single email |
+| `b` | Billing correlations |
+| `o` | Record outcomes |
+| `e` | Effectiveness dashboard |
+| `d` | Dashboard metrics |
+| `s` | Settings |
+| `l` | View logs |
+| `h` or `?` | Help |
+| `0` | Exit |
+
+### Navigation
+
+- **Back**: Press `b` in any submenu to go back
+- **Help**: Press `h` or `?` for context-sensitive help
+- **Breadcrumbs**: Navigation path shown at top of screens
 
 ## Typical Workflow
 
@@ -151,7 +161,7 @@ The CLI automatically creates and manages a SQLite database with the following t
 
 ## Configuration
 
-Configuration is stored in `config.json`:
+Configuration is stored in `config.json`. All risk scores are now config-driven:
 
 ```json
 {
@@ -160,15 +170,24 @@ Configuration is stored in `config.json`:
     "high": 50,
     "medium": 25
   },
-  "detection_weights": {
-    "excessive_dots": 25,
-    "digit_suffix": 20,
+  "risk_scores": {
+    "excessive_dots": 20,
+    "digit_suffix": 15,
     "scrambled_pattern": 35,
     "name_number_pattern": 40,
-    "written_number": 25,
-    "repeated_word": 35,
-    "suspicious_name": 30
+    "written_number_pattern": 15,
+    "repeated_word_pattern": 25,
+    "suspicious_name": 30,
+    "pov_instant_20s": 50,
+    "pov_instant_40s": 40,
+    "pov_fast_60s": 30,
+    "ip_velocity_high": 30,
+    "desktop_windows_10": 20,
+    "us_state_cluster": 25,
+    "us_city_state_cluster": 30,
+    "intl_country_city_cluster": 30
   },
+  "suspicious_names": ["fatima", "muhammed"],
   "ip_velocity_threshold": 10,
   "whitelisted_affiliates": []
 }
@@ -239,16 +258,38 @@ Enter email: suspicious@example.com
 
 ```
 fraud-detection/
-├── cli_fraud_detection.py   # Main CLI interface
+├── cli_app.py                # New modular CLI (v3.0) - RECOMMENDED
+├── cli_fraud_detection.py    # Legacy CLI interface
+├── cli/                      # CLI modules
+│   ├── __init__.py
+│   ├── helpers.py            # UI helpers, formatters, responsive tables
+│   └── menu.py               # Menu system, shortcuts, help
 ├── database.py               # Database management
 ├── api_client.py             # API integration
 ├── config.py                 # Configuration management
-├── config.json               # User configuration
+├── config.json               # User configuration (created on first run)
+├── config.example.json       # Example configuration template
 ├── affiliate_data.db         # SQLite database
 ├── scripts/
 │   └── email_fraud_detector.py  # Fraud detection engine
+├── tests/                    # Unit tests
+│   ├── test_email_fraud_detector.py
+│   └── test_database.py
 ├── reports/                  # Generated reports
 └── fraud_detection.log       # Activity logs
+```
+
+## Running Tests
+
+```bash
+# Run all tests
+python -m pytest tests/ -v
+
+# Run specific test file
+python -m pytest tests/test_email_fraud_detector.py -v
+
+# Run with coverage (if pytest-cov installed)
+python -m pytest tests/ --cov=. --cov-report=html
 ```
 
 ## Performance Tips

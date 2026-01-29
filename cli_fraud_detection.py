@@ -125,11 +125,15 @@ class FraudDetectionCLI:
             menu_table.add_row("13", "🎯 Ensemble Anomaly Detection")
             menu_table.add_row("14", "🤖 Advanced Anomaly Detection")
             menu_table.add_row("15", "📉 Drift Monitoring")
+            menu_table.add_row("16", "✅ Review & Record Outcomes")
+            menu_table.add_row("17", "📊 Effectiveness Dashboard")
+            menu_table.add_row("18", "🔍 Low-Risk Sampling")
+            menu_table.add_row("19", "💳 Billing Correlation Analysis")
             menu_table.add_row("0", "❌ Exit")
 
             console.print(Panel(menu_table, title="MAIN MENU", border_style="blue"))
 
-            choice = Prompt.ask("\n[bold black]Enter your choice[/bold black]", choices=["0","1","2","3","4","5","6","7","8","9","10","11","12","13","14","15"])
+            choice = Prompt.ask("\n[bold black]Enter your choice[/bold black]", choices=["0","1","2","3","4","5","6","7","8","9","10","11","12","13","14","15","16","17","18","19"])
 
             if choice == "1":
                 self.fetch_data_menu()
@@ -161,6 +165,14 @@ class FraudDetectionCLI:
                 self.advanced_anomaly_detection()
             elif choice == "15":
                 self.drift_monitoring()
+            elif choice == "16":
+                self.review_outcomes()
+            elif choice == "17":
+                self.effectiveness_dashboard()
+            elif choice == "18":
+                self.low_risk_sampling()
+            elif choice == "19":
+                self.billing_correlation_analysis()
             elif choice == "0":
                 if Confirm.ask("\n[bold yellow]Are you sure you want to exit?[/bold yellow]"):
                     console.print("\n[bold green]Thank you for using Fraud Detection System![/bold green]\n")
@@ -680,9 +692,9 @@ class FraudDetectionCLI:
             alerts_table.add_column("Risk", style="red", justify="right", width=6)
             alerts_table.add_column("Payout", style="dark_orange", justify="right", width=10)
 
-            for idx, row in high_risk_df.iterrows():
+            for i, (idx, row) in enumerate(high_risk_df.iterrows(), start=1):
                 alerts_table.add_row(
-                    str(idx + 1),
+                    str(i),
                     row['email'][:28] + "..." if len(str(row['email'])) > 28 else str(row['email']),
                     str(row['duid']),
                     str(row['risk_score']),
@@ -1541,6 +1553,927 @@ class FraudDetectionCLI:
         else:
             console.print("[green]✓ No significant drift (p ≥ 0.10)[/green]")
             console.print("   → Current detection rules are still effective")
+        
+        Prompt.ask("\nPress Enter to continue")
+
+    def review_outcomes(self):
+        """Review and record outcomes for flagged accounts"""
+        while True:
+            self.show_header()
+            console.print(Panel("✅ REVIEW & RECORD OUTCOMES", style="bold blue"))
+            console.print()
+            
+            console.print("[bold black]Options:[/bold black]")
+            console.print("  1. Review pending high-risk accounts")
+            console.print("  2. Review pending medium-risk accounts")
+            console.print("  3. Record outcome for specific DUID")
+            console.print("  4. View recent outcomes")
+            console.print("  5. Bulk record outcomes from list")
+            console.print("  0. Back to main menu")
+            
+            choice = Prompt.ask("Choice", choices=["0", "1", "2", "3", "4", "5"])
+            
+            if choice == "0":
+                return
+            elif choice == "1":
+                self._review_pending_accounts(min_risk=50)
+            elif choice == "2":
+                self._review_pending_accounts(min_risk=25, max_risk=49)
+            elif choice == "3":
+                self._record_single_outcome()
+            elif choice == "4":
+                self._view_recent_outcomes()
+            elif choice == "5":
+                self._bulk_record_outcomes()
+
+    def _review_pending_accounts(self, min_risk=50, max_risk=None):
+        """Review pending accounts one by one"""
+        self.show_header()
+        console.print(Panel(f"📋 PENDING REVIEWS (Risk ≥ {min_risk})", style="bold blue"))
+        console.print()
+        
+        # Get pending accounts
+        pending_df = self.db.get_pending_reviews(min_risk=min_risk, limit=20)
+        
+        if max_risk:
+            pending_df = pending_df[pending_df['risk_score'] <= max_risk]
+        
+        if pending_df.empty:
+            console.print("[green]✓ No pending accounts to review![/green]")
+            Prompt.ask("\nPress Enter to continue")
+            return
+        
+        console.print(f"[yellow]Found {len(pending_df)} accounts pending review[/yellow]\n")
+        
+        # Display table
+        table = Table(box=box.ROUNDED)
+        table.add_column("#", style="blue", width=3)
+        table.add_column("Email", style="black", width=35)
+        table.add_column("DUID", style="black", width=15)
+        table.add_column("Risk", justify="right", style="red", width=6)
+        table.add_column("Payout", justify="right", style="black", width=10)
+        table.add_column("Flags", style="dim", width=30)
+        
+        for i, (idx, row) in enumerate(pending_df.iterrows(), start=1):
+            flags = str(row.get('flags', ''))[:28] + "..." if len(str(row.get('flags', ''))) > 28 else str(row.get('flags', ''))
+            table.add_row(
+                str(i),
+                str(row['email'])[:33] + "..." if len(str(row['email'])) > 33 else str(row['email']),
+                str(row['duid']),
+                str(row['risk_score']),
+                f"${row['payout_amount']:.2f}",
+                flags
+            )
+        
+        console.print(table)
+        
+        # Select account to review
+        console.print("\n[bold black]Enter row number to review, or 0 to go back[/bold black]")
+        selection = Prompt.ask("Selection")
+        
+        if selection == "0":
+            return
+        
+        try:
+            idx = int(selection) - 1
+            if 0 <= idx < len(pending_df):
+                row = pending_df.iloc[idx]
+                self._review_single_account(row)
+            else:
+                console.print("[red]Invalid selection[/red]")
+        except ValueError:
+            console.print("[red]Invalid input[/red]")
+        
+        Prompt.ask("\nPress Enter to continue")
+
+    def _review_single_account(self, row):
+        """Review a single account and record outcome"""
+        console.print("\n" + "="*60)
+        console.print(Panel(f"Reviewing: {row['email']}", style="bold yellow"))
+        
+        # Show details
+        details_table = Table(show_header=False, box=box.SIMPLE)
+        details_table.add_column("Field", style="blue")
+        details_table.add_column("Value", style="black")
+        
+        details_table.add_row("DUID", str(row['duid']))
+        details_table.add_row("Email", str(row['email']))
+        details_table.add_row("Risk Score", str(row['risk_score']))
+        details_table.add_row("Payout", f"${row['payout_amount']:.2f}")
+        details_table.add_row("Flags", str(row.get('flags', 'N/A')))
+        details_table.add_row("Analyzed", str(row.get('analyzed_at', 'N/A')))
+        
+        console.print(details_table)
+        
+        # Get outcome
+        console.print("\n[bold black]Record Outcome:[/bold black]")
+        console.print("  [1] Confirmed Fraud")
+        console.print("  [2] False Positive (Legitimate)")
+        console.print("  [3] Under Review (Need more info)")
+        console.print("  [4] Skip (don't record)")
+        
+        outcome_choice = Prompt.ask("Outcome", choices=["1", "2", "3", "4"])
+        
+        if outcome_choice == "4":
+            return
+        
+        outcome_map = {
+            "1": "confirmed_fraud",
+            "2": "false_positive",
+            "3": "under_review"
+        }
+        outcome = outcome_map[outcome_choice]
+        
+        # Get additional details for confirmed fraud
+        actual_loss = 0
+        recovery = 0
+        if outcome == "confirmed_fraud":
+            if Confirm.ask("Record actual financial loss?", default=False):
+                actual_loss = float(Prompt.ask("Actual loss amount", default="0"))
+            if Confirm.ask("Record recovery amount?", default=False):
+                recovery = float(Prompt.ask("Recovery amount", default="0"))
+        
+        # Get notes
+        notes = Prompt.ask("Notes (optional)", default="")
+        reviewer = Prompt.ask("Your name/ID (optional)", default="")
+        
+        # Record outcome
+        success = self.db.record_fraud_outcome(
+            duid=row['duid'],
+            outcome=outcome,
+            notes=notes if notes else None,
+            reviewed_by=reviewer if reviewer else None,
+            actual_loss=actual_loss,
+            recovery_amount=recovery
+        )
+        
+        if success:
+            console.print(f"\n[green]✓ Outcome recorded: {outcome}[/green]")
+        else:
+            console.print("\n[red]✗ Failed to record outcome[/red]")
+
+    def _record_single_outcome(self):
+        """Record outcome for a specific DUID"""
+        self.show_header()
+        console.print(Panel("📝 RECORD OUTCOME BY DUID", style="bold blue"))
+        console.print()
+        
+        duid = Prompt.ask("Enter DUID")
+        
+        # Check if DUID exists
+        import pandas as pd
+        import sqlite3
+        
+        conn = sqlite3.connect(self.db.db_path)
+        df = pd.read_sql_query(
+            "SELECT * FROM fraud_results WHERE duid = ?",
+            conn, params=[duid]
+        )
+        conn.close()
+        
+        if df.empty:
+            console.print(f"[red]No fraud result found for DUID: {duid}[/red]")
+            Prompt.ask("\nPress Enter to continue")
+            return
+        
+        row = df.iloc[0]
+        self._review_single_account(row)
+        Prompt.ask("\nPress Enter to continue")
+
+    def _view_recent_outcomes(self):
+        """View recently recorded outcomes"""
+        self.show_header()
+        console.print(Panel("📋 RECENT OUTCOMES", style="bold blue"))
+        console.print()
+        
+        days = IntPrompt.ask("Days to look back", default=30)
+        
+        outcomes_df = self.db.get_reviewed_outcomes(days=days)
+        
+        if outcomes_df.empty:
+            console.print("[yellow]No outcomes recorded in this period[/yellow]")
+            Prompt.ask("\nPress Enter to continue")
+            return
+        
+        # Summary
+        summary = outcomes_df['outcome'].value_counts()
+        console.print("[bold black]Outcome Summary:[/bold black]\n")
+        
+        summary_table = Table(box=box.ROUNDED)
+        summary_table.add_column("Outcome", style="blue")
+        summary_table.add_column("Count", justify="right", style="black")
+        summary_table.add_column("Total Payout", justify="right", style="black")
+        
+        for outcome in ['confirmed_fraud', 'false_positive', 'under_review', 'legitimate']:
+            if outcome in summary.index:
+                count = summary[outcome]
+                payout = outcomes_df[outcomes_df['outcome'] == outcome]['payout_amount'].sum()
+                summary_table.add_row(outcome.replace('_', ' ').title(), str(count), f"${payout:.2f}")
+        
+        console.print(summary_table)
+        
+        # Recent entries
+        console.print("\n[bold black]Recent Entries:[/bold black]\n")
+        
+        recent_table = Table(box=box.ROUNDED)
+        recent_table.add_column("Date", style="blue", width=12)
+        recent_table.add_column("Email", style="black", width=30)
+        recent_table.add_column("Risk", justify="right", width=6)
+        recent_table.add_column("Outcome", style="black", width=15)
+        recent_table.add_column("Payout", justify="right", width=10)
+        
+        for i, (idx, row) in enumerate(outcomes_df.head(15).iterrows()):
+            date_str = str(row['reviewed_at'])[:10] if row['reviewed_at'] else 'N/A'
+            outcome_display = str(row['outcome']).replace('_', ' ').title()
+            recent_table.add_row(
+                date_str,
+                str(row['email'])[:28] + "..." if len(str(row['email'])) > 28 else str(row['email']),
+                str(row['risk_score']),
+                outcome_display,
+                f"${row['payout_amount']:.2f}"
+            )
+        
+        console.print(recent_table)
+        
+        Prompt.ask("\nPress Enter to continue")
+
+    def _bulk_record_outcomes(self):
+        """Bulk record outcomes from a comma-separated list"""
+        self.show_header()
+        console.print(Panel("📋 BULK RECORD OUTCOMES", style="bold blue"))
+        console.print()
+        
+        console.print("[bold black]Select outcome to apply:[/bold black]")
+        console.print("  [1] Confirmed Fraud")
+        console.print("  [2] False Positive")
+        console.print("  [3] Under Review")
+        
+        outcome_choice = Prompt.ask("Outcome", choices=["1", "2", "3"])
+        outcome_map = {"1": "confirmed_fraud", "2": "false_positive", "3": "under_review"}
+        outcome = outcome_map[outcome_choice]
+        
+        console.print("\n[bold black]Enter DUIDs (comma-separated):[/bold black]")
+        duids_input = Prompt.ask("DUIDs")
+        
+        duids = [d.strip() for d in duids_input.split(',') if d.strip()]
+        
+        if not duids:
+            console.print("[red]No valid DUIDs entered[/red]")
+            Prompt.ask("\nPress Enter to continue")
+            return
+        
+        reviewer = Prompt.ask("Your name/ID (optional)", default="")
+        notes = Prompt.ask("Notes for all (optional)", default="")
+        
+        success_count = 0
+        fail_count = 0
+        
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            console=console
+        ) as progress:
+            task = progress.add_task(f"Recording {len(duids)} outcomes...", total=len(duids))
+            
+            for duid in duids:
+                if self.db.record_fraud_outcome(
+                    duid=duid,
+                    outcome=outcome,
+                    notes=notes if notes else None,
+                    reviewed_by=reviewer if reviewer else None
+                ):
+                    success_count += 1
+                else:
+                    fail_count += 1
+                progress.advance(task)
+        
+        console.print(f"\n[green]✓ Recorded: {success_count}[/green]")
+        if fail_count > 0:
+            console.print(f"[red]✗ Failed: {fail_count}[/red]")
+        
+        Prompt.ask("\nPress Enter to continue")
+
+    def effectiveness_dashboard(self):
+        """Display effectiveness dashboard with key metrics"""
+        self.show_header()
+        console.print(Panel("📊 DETECTION EFFECTIVENESS DASHBOARD", style="bold blue"))
+        console.print()
+        
+        # Calculate fresh metrics
+        self.db.calculate_and_store_metrics()
+        
+        # Get metrics
+        metrics = self.db.get_effectiveness_metrics()
+        
+        # Overview panel
+        console.print("[bold black]Detection Overview[/bold black]\n")
+        
+        overview_table = Table(box=box.ROUNDED, show_header=False)
+        overview_table.add_column("Metric", style="blue", width=30)
+        overview_table.add_column("High Risk", justify="right", style="red", width=15)
+        overview_table.add_column("Medium Risk", justify="right", style="yellow", width=15)
+        
+        overview_table.add_row(
+            "Total Flagged",
+            f"{metrics['total_flagged_high']:,}",
+            f"{metrics['total_flagged_medium']:,}"
+        )
+        overview_table.add_row(
+            "Reviewed",
+            f"{metrics['reviewed_high']:,}",
+            f"{metrics['reviewed_medium']:,}"
+        )
+        overview_table.add_row(
+            "Confirmed Fraud",
+            f"{metrics['confirmed_fraud_high']:,}",
+            f"{metrics['confirmed_fraud_medium']:,}"
+        )
+        overview_table.add_row(
+            "False Positives",
+            f"{metrics['false_positives_high']:,}",
+            f"{metrics['false_positives_medium']:,}"
+        )
+        
+        # Precision
+        precision_high = f"{metrics['precision_high']*100:.1f}%" if metrics['precision_high'] is not None else "N/A"
+        precision_med = f"{metrics['precision_medium']*100:.1f}%" if metrics['precision_medium'] is not None else "N/A"
+        overview_table.add_row("Precision", precision_high, precision_med)
+        
+        console.print(overview_table)
+        
+        # Financial impact
+        console.print("\n[bold black]Financial Impact[/bold black]\n")
+        
+        financial_table = Table(box=box.ROUNDED, show_header=False)
+        financial_table.add_column("Metric", style="blue", width=30)
+        financial_table.add_column("Value", justify="right", style="black", width=20)
+        
+        financial_table.add_row("Total Payout at Risk (High)", f"${metrics['total_payout_at_risk']:,.2f}")
+        financial_table.add_row("Confirmed Fraud Amount", f"${metrics['confirmed_fraud_amount']:,.2f}")
+        financial_table.add_row("False Positive Amount", f"${metrics['false_positive_amount']:,.2f}")
+        financial_table.add_row("Amount Recovered", f"${metrics['recovery_amount']:,.2f}")
+        
+        console.print(financial_table)
+        
+        # False negative estimate
+        console.print("\n[bold black]False Negative Detection[/bold black]\n")
+        
+        fn_table = Table(box=box.ROUNDED, show_header=False)
+        fn_table.add_column("Metric", style="blue", width=30)
+        fn_table.add_column("Value", justify="right", style="black", width=20)
+        
+        fn_table.add_row("Low-Risk Samples Reviewed", str(metrics.get('missed_fraud_count', 0) + 
+            len(self.db.get_low_risk_samples(status='legitimate'))))
+        fn_table.add_row("Missed Fraud Found", str(metrics['missed_fraud_count']))
+        
+        fn_rate = metrics.get('estimated_false_negative_rate')
+        fn_rate_str = f"{fn_rate*100:.1f}%" if fn_rate is not None else "Not enough data"
+        fn_table.add_row("Est. False Negative Rate", fn_rate_str)
+        
+        console.print(fn_table)
+        
+        # Recommendations
+        console.print("\n[bold black]Recommendations[/bold black]\n")
+        
+        pending_high = metrics['total_flagged_high'] - metrics['reviewed_high']
+        if pending_high > 0:
+            console.print(f"  ⚠️  {pending_high:,} high-risk accounts pending review")
+        
+        if metrics['precision_high'] is not None and metrics['precision_high'] < 0.5:
+            console.print("  ⚠️  High-risk precision below 50% - consider adjusting thresholds")
+        
+        if metrics['precision_high'] is not None and metrics['precision_high'] > 0.9:
+            console.print("  💡 High precision - you might be missing fraud. Lower thresholds?")
+        
+        if metrics['reviewed_high'] < 10:
+            console.print("  📝 Review more accounts to get reliable precision estimates")
+        
+        if metrics['missed_fraud_count'] > 0:
+            rate = metrics.get('estimated_false_negative_rate', 0) or 0
+            console.print(f"  ⚠️  Found {metrics['missed_fraud_count']} missed frauds in low-risk samples ({rate*100:.0f}% rate)")
+        
+        Prompt.ask("\nPress Enter to continue")
+
+    def low_risk_sampling(self):
+        """Sample and review low-risk accounts for false negative detection"""
+        while True:
+            self.show_header()
+            console.print(Panel("🔍 LOW-RISK SAMPLING", style="bold blue"))
+            console.print()
+            
+            console.print("[bold black]Purpose:[/bold black] Find fraud that slipped through detection\n")
+            
+            console.print("[bold black]Options:[/bold black]")
+            console.print("  1. Generate new sample (random low-risk accounts)")
+            console.print("  2. Review pending samples")
+            console.print("  3. View sample history")
+            console.print("  0. Back to main menu")
+            
+            choice = Prompt.ask("Choice", choices=["0", "1", "2", "3"])
+            
+            if choice == "0":
+                return
+            elif choice == "1":
+                self._generate_low_risk_sample()
+            elif choice == "2":
+                self._review_low_risk_samples()
+            elif choice == "3":
+                self._view_sample_history()
+
+    def _generate_low_risk_sample(self):
+        """Generate a new random sample of low-risk accounts"""
+        self.show_header()
+        console.print(Panel("🎲 GENERATE LOW-RISK SAMPLE", style="bold blue"))
+        console.print()
+        
+        count = IntPrompt.ask("Number of accounts to sample", default=20)
+        max_risk = IntPrompt.ask("Maximum risk score", default=24)
+        
+        console.print(f"\n[yellow]Sampling {count} accounts with risk ≤ {max_risk}...[/yellow]\n")
+        
+        sample_df = self.db.sample_low_risk_accounts(count=count, max_risk=max_risk)
+        
+        if sample_df.empty:
+            console.print("[yellow]No unsampled low-risk accounts available[/yellow]")
+            Prompt.ask("\nPress Enter to continue")
+            return
+        
+        console.print(f"[green]✓ Sampled {len(sample_df)} accounts[/green]\n")
+        
+        # Display sample
+        table = Table(box=box.ROUNDED)
+        table.add_column("#", style="blue", width=3)
+        table.add_column("Email", style="black", width=40)
+        table.add_column("Risk", justify="right", width=6)
+        table.add_column("Payout", justify="right", width=10)
+        
+        for i, (idx, row) in enumerate(sample_df.iterrows(), start=1):
+            table.add_row(
+                str(i),
+                str(row['email']),
+                str(row['risk_score']),
+                f"${row['payout_amount']:.2f}"
+            )
+        
+        console.print(table)
+        
+        console.print("\n[dim]These accounts have been added to the review queue.[/dim]")
+        console.print("[dim]Review them to check for missed fraud.[/dim]")
+        
+        Prompt.ask("\nPress Enter to continue")
+
+    def _review_low_risk_samples(self):
+        """Review pending low-risk samples"""
+        self.show_header()
+        console.print(Panel("📋 REVIEW LOW-RISK SAMPLES", style="bold blue"))
+        console.print()
+        
+        pending_df = self.db.get_low_risk_samples(status='pending')
+        
+        if pending_df.empty:
+            console.print("[green]✓ No pending samples to review![/green]")
+            console.print("[dim]Generate a new sample to continue false negative detection.[/dim]")
+            Prompt.ask("\nPress Enter to continue")
+            return
+        
+        console.print(f"[yellow]Found {len(pending_df)} samples pending review[/yellow]\n")
+        
+        # Display table
+        table = Table(box=box.ROUNDED)
+        table.add_column("#", style="blue", width=3)
+        table.add_column("Email", style="black", width=40)
+        table.add_column("DUID", style="black", width=15)
+        table.add_column("Risk", justify="right", width=6)
+        table.add_column("Payout", justify="right", width=10)
+        
+        for i, (idx, row) in enumerate(pending_df.iterrows(), start=1):
+            table.add_row(
+                str(i),
+                str(row['email']),
+                str(row['duid']),
+                str(row['risk_score']),
+                f"${row['payout_amount']:.2f}"
+            )
+        
+        console.print(table)
+        
+        # Select account to review
+        console.print("\n[bold black]Enter row number to review, or 0 to go back[/bold black]")
+        selection = Prompt.ask("Selection")
+        
+        if selection == "0":
+            return
+        
+        try:
+            idx = int(selection) - 1
+            if 0 <= idx < len(pending_df):
+                row = pending_df.iloc[idx]
+                self._review_single_low_risk(row)
+        except ValueError:
+            console.print("[red]Invalid input[/red]")
+        
+        Prompt.ask("\nPress Enter to continue")
+
+    def _review_single_low_risk(self, row):
+        """Review a single low-risk sample"""
+        console.print("\n" + "="*60)
+        console.print(Panel(f"Reviewing: {row['email']}", style="bold yellow"))
+        
+        console.print(f"  DUID: {row['duid']}")
+        console.print(f"  Risk Score: {row['risk_score']}")
+        console.print(f"  Payout: ${row['payout_amount']:.2f}")
+        console.print(f"  Flags: {row.get('flags', 'None')}")
+        
+        console.print("\n[bold black]Is this account fraudulent?[/bold black]")
+        console.print("  [1] Yes - Missed Fraud!")
+        console.print("  [2] No - Legitimate")
+        console.print("  [3] Skip")
+        
+        choice = Prompt.ask("Choice", choices=["1", "2", "3"])
+        
+        if choice == "3":
+            return
+        
+        status_map = {"1": "missed_fraud", "2": "legitimate"}
+        status = status_map[choice]
+        
+        notes = Prompt.ask("Notes (optional)", default="")
+        
+        success = self.db.record_low_risk_review(
+            duid=row['duid'],
+            status=status,
+            notes=notes if notes else None
+        )
+        
+        if success:
+            if status == "missed_fraud":
+                console.print("\n[red]⚠️  MISSED FRAUD RECORDED[/red]")
+                console.print("[dim]This helps improve detection rules![/dim]")
+            else:
+                console.print("\n[green]✓ Recorded as legitimate[/green]")
+        else:
+            console.print("\n[red]✗ Failed to record[/red]")
+
+    def _view_sample_history(self):
+        """View history of low-risk samples"""
+        self.show_header()
+        console.print(Panel("📊 SAMPLE HISTORY", style="bold blue"))
+        console.print()
+        
+        all_samples = self.db.get_low_risk_samples(status='all')
+        
+        if all_samples.empty:
+            console.print("[yellow]No samples recorded yet[/yellow]")
+            Prompt.ask("\nPress Enter to continue")
+            return
+        
+        # Summary
+        summary = all_samples['review_status'].value_counts()
+        
+        console.print("[bold black]Summary:[/bold black]\n")
+        
+        summary_table = Table(box=box.ROUNDED)
+        summary_table.add_column("Status", style="blue")
+        summary_table.add_column("Count", justify="right", style="black")
+        
+        for status in ['pending', 'missed_fraud', 'legitimate', 'reviewed']:
+            if status in summary.index:
+                summary_table.add_row(status.replace('_', ' ').title(), str(summary[status]))
+        
+        console.print(summary_table)
+        
+        # Missed fraud rate
+        reviewed = len(all_samples[all_samples['review_status'].isin(['missed_fraud', 'legitimate'])])
+        missed = len(all_samples[all_samples['review_status'] == 'missed_fraud'])
+        
+        if reviewed > 0:
+            rate = missed / reviewed * 100
+            console.print(f"\n[bold]Estimated False Negative Rate: {rate:.1f}%[/bold]")
+            
+            if rate > 5:
+                console.print("[red]⚠️  High false negative rate! Consider lowering risk thresholds.[/red]")
+            elif rate > 0:
+                console.print("[yellow]Some fraud slipping through. Review detection rules.[/yellow]")
+            else:
+                console.print("[green]✓ No missed fraud detected in samples.[/green]")
+        
+        Prompt.ask("\nPress Enter to continue")
+
+    def billing_correlation_analysis(self):
+        """Analyze billing correlations to detect fraud rings"""
+        while True:
+            self.show_header()
+            console.print(Panel("💳 BILLING CORRELATION ANALYSIS", style="bold blue"))
+            console.print()
+            
+            console.print("[bold black]Purpose:[/bold black] Find accounts sharing billing info (fraud rings)\n")
+            
+            console.print("[bold black]Options:[/bold black]")
+            console.print("  1. View billing correlation summary")
+            console.print("  2. Find shared billing accounts")
+            console.print("  3. Find IPs with multiple cards")
+            console.print("  4. Find name clusters")
+            console.print("  5. Investigate specific billing cluster")
+            console.print("  0. Back to main menu")
+            
+            choice = Prompt.ask("Choice", choices=["0", "1", "2", "3", "4", "5"])
+            
+            if choice == "0":
+                return
+            elif choice == "1":
+                self._billing_summary()
+            elif choice == "2":
+                self._shared_billing_accounts()
+            elif choice == "3":
+                self._multi_card_ips()
+            elif choice == "4":
+                self._name_clusters()
+            elif choice == "5":
+                self._investigate_billing_cluster()
+
+    def _billing_summary(self):
+        """Display billing correlation summary"""
+        self.show_header()
+        console.print(Panel("📊 BILLING CORRELATION SUMMARY", style="bold blue"))
+        console.print()
+        
+        summary = self.db.get_high_risk_billing_summary()
+        
+        # Overview
+        console.print("[bold black]Fraud Ring Indicators:[/bold black]\n")
+        
+        summary_table = Table(box=box.ROUNDED, show_header=False)
+        summary_table.add_column("Indicator", style="blue", width=35)
+        summary_table.add_column("Count", justify="right", style="black", width=15)
+        summary_table.add_column("Risk", style="red", width=15)
+        
+        # Shared billing
+        risk_level = "🔴 HIGH" if summary['shared_billing_clusters'] > 5 else "🟡 MEDIUM" if summary['shared_billing_clusters'] > 0 else "🟢 LOW"
+        summary_table.add_row(
+            "Shared Billing Clusters",
+            str(summary['shared_billing_clusters']),
+            risk_level
+        )
+        
+        summary_table.add_row(
+            "  → Accounts in Clusters",
+            str(summary['accounts_in_clusters']),
+            ""
+        )
+        
+        summary_table.add_row(
+            "  → Payout at Risk",
+            f"${summary['total_payout_at_risk']:,.2f}",
+            ""
+        )
+        
+        # Multi-card IPs
+        risk_level = "🔴 HIGH" if summary['multi_card_ips'] > 3 else "🟡 MEDIUM" if summary['multi_card_ips'] > 0 else "🟢 LOW"
+        summary_table.add_row(
+            "IPs with Multiple Cards",
+            str(summary['multi_card_ips']),
+            risk_level
+        )
+        
+        # Name clusters
+        risk_level = "🔴 HIGH" if summary['name_clusters'] > 5 else "🟡 MEDIUM" if summary['name_clusters'] > 0 else "🟢 LOW"
+        summary_table.add_row(
+            "Name Clusters (3+ accounts)",
+            str(summary['name_clusters']),
+            risk_level
+        )
+        
+        # Chargebacks
+        risk_level = "🔴 HIGH" if summary['high_chargeback_accounts'] > 10 else "🟡 MEDIUM" if summary['high_chargeback_accounts'] > 0 else "🟢 LOW"
+        summary_table.add_row(
+            "Accounts with Chargebacks",
+            str(summary['high_chargeback_accounts']),
+            risk_level
+        )
+        
+        console.print(summary_table)
+        
+        # Interpretation
+        console.print("\n[bold black]Interpretation:[/bold black]")
+        
+        if summary['shared_billing_clusters'] > 0:
+            console.print(f"  ⚠️  {summary['shared_billing_clusters']} billing IDs used by multiple accounts")
+            console.print("     This is a strong fraud indicator - same card, multiple accounts")
+        
+        if summary['multi_card_ips'] > 0:
+            console.print(f"  ⚠️  {summary['multi_card_ips']} IPs used with multiple different cards")
+            console.print("     Likely card testing or fraud ring activity")
+        
+        if summary['shared_billing_clusters'] == 0 and summary['multi_card_ips'] == 0:
+            console.print("  ✓ No obvious billing fraud patterns detected")
+        
+        Prompt.ask("\nPress Enter to continue")
+
+    def _shared_billing_accounts(self):
+        """Find accounts sharing billing information"""
+        self.show_header()
+        console.print(Panel("💳 SHARED BILLING ACCOUNTS", style="bold blue"))
+        console.print()
+        
+        min_accounts = IntPrompt.ask("Minimum accounts per billing ID", default=2)
+        
+        df = self.db.get_billing_correlations(min_accounts=min_accounts)
+        
+        if df.empty:
+            console.print("[green]✓ No shared billing accounts found[/green]")
+            Prompt.ask("\nPress Enter to continue")
+            return
+        
+        console.print(f"[red]⚠️  Found {len(df)} billing IDs shared by multiple accounts![/red]\n")
+        
+        # Display clusters
+        table = Table(box=box.ROUNDED)
+        table.add_column("#", style="blue", width=3)
+        table.add_column("Billing ID", style="black", width=20)
+        table.add_column("Accounts", justify="right", width=8)
+        table.add_column("Total Payout", justify="right", width=12)
+        table.add_column("Avg Chargebacks", justify="right", width=12)
+        table.add_column("Names", style="dim", width=25)
+        
+        for i, (idx, row) in enumerate(df.head(20).iterrows(), start=1):
+            billing_id = str(row['processor_subscriber_id'])[:18] + "..." if len(str(row['processor_subscriber_id'])) > 18 else str(row['processor_subscriber_id'])
+            names = str(row['names'])[:23] + "..." if len(str(row['names'])) > 23 else str(row['names'])
+            table.add_row(
+                str(i),
+                billing_id,
+                str(row['account_count']),
+                f"${row['total_payout']:,.2f}",
+                f"{row['avg_chargebacks']:.1f}",
+                names
+            )
+        
+        console.print(table)
+        
+        if len(df) > 20:
+            console.print(f"\n[dim]Showing top 20 of {len(df)} clusters[/dim]")
+        
+        # Export option
+        if Confirm.ask("\n[bold]Export to CSV?[/bold]"):
+            from pathlib import Path
+            reports_dir = Path("reports")
+            reports_dir.mkdir(exist_ok=True)
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = reports_dir / f"billing_correlations_{timestamp}.csv"
+            df.to_csv(filename, index=False)
+            console.print(f"[green]✓ Exported to {filename}[/green]")
+        
+        Prompt.ask("\nPress Enter to continue")
+
+    def _multi_card_ips(self):
+        """Find IPs using multiple different cards"""
+        self.show_header()
+        console.print(Panel("🌐 IPs WITH MULTIPLE CARDS", style="bold blue"))
+        console.print()
+        
+        df = self.db.get_ip_billing_correlations()
+        
+        if df.empty:
+            console.print("[green]✓ No IPs with multiple cards found[/green]")
+            Prompt.ask("\nPress Enter to continue")
+            return
+        
+        console.print(f"[red]⚠️  Found {len(df)} IPs used with multiple cards![/red]\n")
+        console.print("[dim]This often indicates card testing or fraud ring activity[/dim]\n")
+        
+        table = Table(box=box.ROUNDED)
+        table.add_column("#", style="blue", width=3)
+        table.add_column("IP Address", style="black", width=15)
+        table.add_column("Unique Cards", justify="right", width=12)
+        table.add_column("Transactions", justify="right", width=12)
+        table.add_column("Total Payout", justify="right", width=12)
+        table.add_column("Chargebacks", justify="right", width=10)
+        
+        for i, (idx, row) in enumerate(df.head(20).iterrows(), start=1):
+            table.add_row(
+                str(i),
+                str(row['ip']),
+                str(row['unique_cards']),
+                str(row['total_transactions']),
+                f"${row['total_payout']:,.2f}",
+                str(int(row['total_chargebacks']))
+            )
+        
+        console.print(table)
+        
+        Prompt.ask("\nPress Enter to continue")
+
+    def _name_clusters(self):
+        """Find accounts with matching names"""
+        self.show_header()
+        console.print(Panel("👤 NAME CLUSTERS", style="bold blue"))
+        console.print()
+        
+        min_accounts = IntPrompt.ask("Minimum accounts per name", default=3)
+        
+        df = self.db.get_name_correlations(min_accounts=min_accounts)
+        
+        if df.empty:
+            console.print("[green]✓ No name clusters found[/green]")
+            Prompt.ask("\nPress Enter to continue")
+            return
+        
+        console.print(f"[yellow]Found {len(df)} names used by multiple accounts[/yellow]\n")
+        
+        table = Table(box=box.ROUNDED)
+        table.add_column("#", style="blue", width=3)
+        table.add_column("Name", style="black", width=25)
+        table.add_column("Accounts", justify="right", width=10)
+        table.add_column("Unique Cards", justify="right", width=12)
+        table.add_column("Total Payout", justify="right", width=12)
+        table.add_column("Chargebacks", justify="right", width=10)
+        
+        for i, (idx, row) in enumerate(df.head(20).iterrows(), start=1):
+            table.add_row(
+                str(i),
+                str(row['full_name']).title(),
+                str(row['account_count']),
+                str(row['unique_cards']),
+                f"${row['total_payout']:,.2f}",
+                str(int(row['total_chargebacks']))
+            )
+        
+        console.print(table)
+        
+        console.print("\n[dim]Note: Same name with multiple cards is more suspicious[/dim]")
+        
+        Prompt.ask("\nPress Enter to continue")
+
+    def _investigate_billing_cluster(self):
+        """Investigate a specific billing cluster"""
+        self.show_header()
+        console.print(Panel("🔍 INVESTIGATE BILLING CLUSTER", style="bold blue"))
+        console.print()
+        
+        billing_id = Prompt.ask("Enter Processor Subscriber ID (billing ID)")
+        
+        df = self.db.get_billing_cluster_details(billing_id)
+        
+        if df.empty:
+            console.print(f"[yellow]No accounts found for billing ID: {billing_id}[/yellow]")
+            Prompt.ask("\nPress Enter to continue")
+            return
+        
+        console.print(f"[bold]Found {len(df)} accounts with this billing ID:[/bold]\n")
+        
+        # Summary
+        total_payout = df['payout_amount'].sum()
+        total_chargebacks = df['chargeback_count'].sum()
+        unique_ips = df['ip'].nunique()
+        unique_emails = df['email'].nunique()
+        
+        summary_table = Table(box=box.SIMPLE, show_header=False)
+        summary_table.add_column("Metric", style="blue")
+        summary_table.add_column("Value", style="black")
+        
+        summary_table.add_row("Total Accounts", str(len(df)))
+        summary_table.add_row("Total Payout", f"${total_payout:,.2f}")
+        summary_table.add_row("Total Chargebacks", str(int(total_chargebacks)))
+        summary_table.add_row("Unique IPs", str(unique_ips))
+        summary_table.add_row("Unique Emails", str(unique_emails))
+        
+        console.print(summary_table)
+        
+        # Account details
+        console.print("\n[bold]Account Details:[/bold]\n")
+        
+        details_table = Table(box=box.ROUNDED)
+        details_table.add_column("Email", style="black", width=30)
+        details_table.add_column("Name", style="black", width=20)
+        details_table.add_column("Payout", justify="right", width=10)
+        details_table.add_column("Risk", justify="right", width=6)
+        details_table.add_column("IP", style="dim", width=15)
+        
+        for idx, row in df.iterrows():
+            name = f"{row['first_name'] or ''} {row['last_name'] or ''}".strip() or "N/A"
+            risk = str(int(row['risk_score'])) if row['risk_score'] else "N/A"
+            details_table.add_row(
+                str(row['email'])[:28],
+                name[:18],
+                f"${row['payout_amount']:,.2f}",
+                risk,
+                str(row['ip'])[:13] if row['ip'] else "N/A"
+            )
+        
+        console.print(details_table)
+        
+        # Risk assessment
+        console.print("\n[bold red]⚠️  FRAUD RISK ASSESSMENT:[/bold red]")
+        
+        if len(df) >= 3:
+            console.print("  🔴 HIGH RISK: 3+ accounts sharing same billing info")
+        elif len(df) >= 2:
+            console.print("  🟡 MEDIUM RISK: 2 accounts sharing billing info")
+        
+        if unique_ips == 1 and len(df) > 1:
+            console.print("  🔴 All accounts from same IP address")
+        
+        if total_chargebacks > 0:
+            console.print(f"  🔴 {int(total_chargebacks)} chargebacks on this billing ID")
         
         Prompt.ask("\nPress Enter to continue")
 

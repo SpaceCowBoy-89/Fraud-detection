@@ -16,13 +16,22 @@ This is an **Affiliate Fraud Detection and Prevention System** focused on analyz
 
 ```
 fraud-detection/
-├── scripts/          # Analysis scripts
+├── cli_app.py              # Main CLI application (v3.0) - RECOMMENDED
+├── cli_fraud_detection.py  # Legacy CLI (still works)
+├── cli/                    # CLI modules
+│   ├── helpers.py          # UI utilities, responsive tables
+│   └── menu.py             # Menu system, shortcuts
+├── scripts/                # Analysis scripts
 │   └── email_fraud_detector.py
-├── data/            # Place CSV exports here
+├── tests/                  # Unit tests
+│   ├── test_email_fraud_detector.py
+│   └── test_database.py
+├── data/                   # Place CSV exports here
 │   ├── Leads.csv
 │   └── Sales.csv
-├── reports/         # Generated fraud detection reports
-└── docs/            # Additional documentation
+├── reports/                # Generated fraud detection reports
+├── config.json             # Configuration (risk scores, API key)
+└── docs/                   # Additional documentation
 ```
 
 ## Data Sources and Formats
@@ -76,12 +85,26 @@ Detects:
 
 ## Running Fraud Detection
 
-### Email Fraud Detection
+### Option 1: CLI Application (Recommended)
 ```bash
 cd ~/fraud-detection
 
 # Install dependencies (first time only)
 pip install -r requirements.txt
+
+# Launch CLI
+python cli_app.py
+```
+
+**CLI Features:**
+- Grouped menu (Data, Detection, Analysis, Review, System)
+- Quick shortcuts: `f` (fetch), `r` (run), `v` (view), `a` (alerts), `h` (help)
+- Press `b` to go back in any submenu
+- Config-driven risk scores (edit `config.json`)
+
+### Option 2: Direct Script Analysis
+```bash
+cd ~/fraud-detection
 
 # Run interactively (select from available files)
 python scripts/email_fraud_detector.py
@@ -145,35 +168,36 @@ When requesting API access, prioritize:
 
 ## Risk Score Customization
 
-To adjust fraud detection sensitivity, edit `scripts/email_fraud_detector.py`:
+All risk scores are now **config-driven**. Edit `config.json` to adjust:
 
-```python
-# Line ~105-108: Adjust excessive dots threshold
-if dot_count > 3:
-    risk_score += 25  # Modify this value
-
-# Line ~111-115: Adjust digit suffix risk
-digit_suffix = re.search(r'(\d{4,5})$', username)
-if digit_suffix:
-    risk_score += 20  # Modify this value
-
-# Line ~129-135: Adjust name-number pattern risk (HIGHEST IMPACT)
-name_num_pattern = re.search(r'^([a-z]+)(\d+)([a-z]+)(\d+)', username)
-if name_num_pattern:
-    risk_score += 40  # Modify this value
-
-# Line ~144-147: Adjust suspicious name risk
-if suspicious_found:
-    risk_score += 30  # Modify this value
-
-# Line ~27-30: Add/remove suspicious names
-self.suspicious_names = [
-    'fatima', 'oduwale', 'olatunde', 'muhammed', 'mohammed'
-]
-
-# Line ~188-195: Adjust domain concentration threshold
-if percentage > 90:  # Change from 90% to be more/less strict
+```json
+{
+  "risk_scores": {
+    "excessive_dots": 20,
+    "digit_suffix": 15,
+    "scrambled_pattern": 35,
+    "name_number_pattern": 40,
+    "written_number_pattern": 15,
+    "repeated_word_pattern": 25,
+    "suspicious_name": 30,
+    "pov_instant_20s": 50,
+    "pov_instant_40s": 40,
+    "pov_fast_60s": 30,
+    "ip_velocity_high": 30,
+    "desktop_windows_10": 20,
+    "us_state_cluster": 25,
+    "us_city_state_cluster": 30,
+    "intl_country_city_cluster": 30
+  },
+  "suspicious_names": ["fatima", "muhammed"],
+  "risk_thresholds": {
+    "high": 50,
+    "medium": 25
+  }
+}
 ```
+
+Changes take effect immediately on next analysis run - no code changes needed.
 
 ## Cross-Reference Analysis (Future)
 

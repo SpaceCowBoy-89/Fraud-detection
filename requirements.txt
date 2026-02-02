@@ -13,5 +13,8 @@ scikit-learn>=1.0.0
 mlxtend>=0.21.0
 pyod>=1.1.0
 
+# Web dashboard
+flask>=2.0
+
 # Testing
 pytest>=7.0.0

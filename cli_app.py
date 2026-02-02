@@ -1450,6 +1450,33 @@ class FraudDetectionCLI:
         
         CLIHelpers.wait_for_input()
     
+    def launch_web_dashboard(self):
+        """Launch web dashboard in browser"""
+        CLIHelpers.show_header()
+        self.menu.show_breadcrumb()
+        CLIHelpers.show_section("🌐 WEB DASHBOARD")
+
+        try:
+            from dashboard.app import launch_dashboard
+        except ImportError:
+            CLIHelpers.show_error("Flask not installed. Run: pip install flask")
+            CLIHelpers.wait_for_input()
+            return
+
+        port = 5050
+        started = launch_dashboard(self.db, self.config, port=port, api_client=self.api_client)
+
+        if started:
+            CLIHelpers.show_success(f"Dashboard started at http://localhost:{port}")
+        else:
+            CLIHelpers.show_info(f"Dashboard already running at http://localhost:{port}")
+            CLIHelpers.show_info("Opening browser...")
+            import webbrowser
+            webbrowser.open(f'http://localhost:{port}')
+
+        console.print("\n[dim]Dashboard runs in background. CLI remains fully functional.[/dim]")
+        CLIHelpers.wait_for_input()
+
     def view_logs(self):
         """View recent logs"""
         CLIHelpers.show_header()

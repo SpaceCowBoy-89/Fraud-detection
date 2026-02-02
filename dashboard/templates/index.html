@@ -1,0 +1,2450 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Fraud Detection — Command Center</title>
+<script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@300;400;500&family=Instrument+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+*, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+:root {
+  --bg-primary: #f4f3f0;
+  --bg-secondary: #eae8e4;
+  --bg-card: #ffffff;
+  --bg-card-hover: #fafaf8;
+  --bg-sidebar: #0f1729;
+  --bg-sidebar-hover: #1a2540;
+  --bg-sidebar-active: #243356;
+  --text-primary: #1a1a1a;
+  --text-secondary: #5a5a5a;
+  --text-muted: #8a8a8a;
+  --text-sidebar: #94a3b8;
+  --text-sidebar-active: #e2e8f0;
+  --border: #e0ddd8;
+  --border-subtle: #ece9e4;
+  --risk-high: #ef4444;
+  --risk-high-bg: #fef2f2;
+  --risk-medium: #f59e0b;
+  --risk-medium-bg: #fffbeb;
+  --risk-low: #22c55e;
+  --risk-low-bg: #f0fdf4;
+  --accent: #3b82f6;
+  --accent-muted: #93c5fd;
+  --plotly-template: plotly_white;
+  --plotly-bg: transparent;
+  --plotly-grid: #e5e5e5;
+  --plotly-text: #444;
+  --shadow-sm: 0 1px 2px rgba(0,0,0,0.04);
+  --shadow-md: 0 2px 8px rgba(0,0,0,0.06);
+  --shadow-lg: 0 4px 16px rgba(0,0,0,0.08);
+  --mono: 'DM Mono', 'Menlo', monospace;
+  --sans: 'Instrument Sans', -apple-system, sans-serif;
+}
+
+[data-theme="dark"] {
+  --bg-primary: #0c0f1a;
+  --bg-secondary: #111627;
+  --bg-card: #161b2e;
+  --bg-card-hover: #1c2240;
+  --bg-sidebar: #080b14;
+  --bg-sidebar-hover: #111627;
+  --bg-sidebar-active: #1c2240;
+  --text-primary: #e2e8f0;
+  --text-secondary: #94a3b8;
+  --text-muted: #64748b;
+  --text-sidebar: #64748b;
+  --text-sidebar-active: #e2e8f0;
+  --border: #1e293b;
+  --border-subtle: #1a2035;
+  --risk-high-bg: #1c1117;
+  --risk-medium-bg: #1c1a11;
+  --risk-low-bg: #111c14;
+  --plotly-template: plotly_dark;
+  --plotly-bg: transparent;
+  --plotly-grid: #1e293b;
+  --plotly-text: #94a3b8;
+  --shadow-sm: 0 1px 2px rgba(0,0,0,0.2);
+  --shadow-md: 0 2px 8px rgba(0,0,0,0.3);
+  --shadow-lg: 0 4px 16px rgba(0,0,0,0.4);
+}
+
+html { font-size: 14px; }
+body {
+  font-family: var(--sans);
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  display: flex;
+  min-height: 100vh;
+  overflow-x: hidden;
+}
+
+/* ═══ SIDEBAR ═══ */
+.sidebar {
+  width: 220px;
+  min-width: 220px;
+  background: var(--bg-sidebar);
+  display: flex;
+  flex-direction: column;
+  position: fixed;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  z-index: 100;
+  border-right: 1px solid rgba(255,255,255,0.05);
+}
+
+.sidebar-brand {
+  padding: 20px 16px;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+}
+.sidebar-brand h1 {
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 500;
+  color: #e2e8f0;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+}
+.sidebar-brand .brand-sub {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: #475569;
+  margin-top: 4px;
+  letter-spacing: 0.5px;
+}
+.sidebar-brand .brand-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  background: var(--risk-low);
+  border-radius: 50%;
+  margin-right: 6px;
+  animation: pulse-dot 2s ease-in-out infinite;
+}
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+.sidebar-nav {
+  flex: 1;
+  padding: 12px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.nav-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  color: var(--text-sidebar);
+  font-size: 12.5px;
+  font-weight: 500;
+  transition: all 0.15s ease;
+  user-select: none;
+  position: relative;
+}
+.nav-item:hover {
+  background: var(--bg-sidebar-hover);
+  color: var(--text-sidebar-active);
+}
+.nav-item.active {
+  background: var(--bg-sidebar-active);
+  color: var(--text-sidebar-active);
+}
+.nav-item.active::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 3px;
+  height: 20px;
+  background: var(--accent);
+  border-radius: 0 2px 2px 0;
+}
+.nav-icon {
+  font-size: 15px;
+  width: 20px;
+  text-align: center;
+  flex-shrink: 0;
+}
+.nav-label {
+  font-family: var(--sans);
+  white-space: nowrap;
+}
+.nav-item .nav-badge {
+  margin-left: auto;
+  font-family: var(--mono);
+  font-size: 10px;
+  background: var(--risk-high);
+  color: #fff;
+  padding: 1px 6px;
+  border-radius: 8px;
+  font-weight: 500;
+}
+
+.sidebar-footer {
+  padding: 12px;
+  border-top: 1px solid rgba(255,255,255,0.06);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.theme-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  color: var(--text-sidebar);
+  font-size: 11px;
+  font-family: var(--mono);
+  transition: all 0.15s ease;
+  background: none;
+  border: none;
+  width: 100%;
+  text-align: left;
+}
+.theme-toggle:hover { background: var(--bg-sidebar-hover); color: var(--text-sidebar-active); }
+
+.auto-refresh-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  color: var(--text-sidebar);
+  font-size: 11px;
+  font-family: var(--mono);
+  transition: all 0.15s ease;
+  background: none;
+  border: none;
+  width: 100%;
+  text-align: left;
+}
+.auto-refresh-toggle:hover { background: var(--bg-sidebar-hover); color: var(--text-sidebar-active); }
+.auto-refresh-toggle .refresh-indicator {
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: var(--text-muted);
+  transition: background 0.3s;
+}
+.auto-refresh-toggle.active .refresh-indicator { background: var(--risk-low); }
+
+/* ═══ MAIN ═══ */
+.main {
+  flex: 1;
+  margin-left: 220px;
+  min-height: 100vh;
+}
+
+.main-header {
+  padding: 16px 28px;
+  background: var(--bg-card);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  backdrop-filter: blur(8px);
+}
+.main-header h2 {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.header-meta {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+.header-meta .status-dot {
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  display: inline-block;
+  margin-right: 4px;
+}
+.header-meta .status-dot.live { background: var(--risk-low); }
+
+.content {
+  padding: 24px 28px;
+}
+
+/* ═══ TAB PANELS ═══ */
+.tab-panel { display: none; }
+.tab-panel.active { display: block; animation: fadeIn 0.2s ease; }
+@keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+
+/* ═══ METRIC CARDS ═══ */
+.metrics-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 16px;
+  margin-bottom: 24px;
+}
+.metric-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 20px;
+  box-shadow: var(--shadow-sm);
+  transition: box-shadow 0.2s, border-color 0.2s;
+}
+.metric-card:hover { box-shadow: var(--shadow-md); border-color: var(--accent-muted); }
+.metric-card .metric-label {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  margin-bottom: 8px;
+}
+.metric-card .metric-value {
+  font-family: var(--mono);
+  font-size: 26px;
+  font-weight: 500;
+  color: var(--text-primary);
+  line-height: 1;
+}
+.metric-card .metric-value.high { color: var(--risk-high); }
+.metric-card .metric-value.medium { color: var(--risk-medium); }
+.metric-card .metric-value.low { color: var(--risk-low); }
+.metric-card .metric-sub {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 6px;
+}
+
+/* ═══ PANELS / SECTIONS ═══ */
+.panel {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: var(--shadow-sm);
+  margin-bottom: 20px;
+  overflow: hidden;
+}
+.panel-header {
+  padding: 14px 20px;
+  border-bottom: 1px solid var(--border-subtle);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.panel-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.panel-subtitle {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  color: var(--text-muted);
+}
+.panel-body { padding: 16px 20px; }
+.panel-body.no-pad { padding: 0; }
+
+.grid-2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
+  margin-bottom: 20px;
+}
+@media (max-width: 900px) { .grid-2 { grid-template-columns: 1fr; } }
+
+/* ═══ TABLES ═══ */
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12.5px;
+}
+.data-table thead th {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  font-weight: 500;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+  user-select: none;
+  position: relative;
+}
+.data-table thead th:hover { color: var(--text-primary); }
+.data-table thead th.sorted-asc::after { content: ' ▲'; font-size: 8px; }
+.data-table thead th.sorted-desc::after { content: ' ▼'; font-size: 8px; }
+.data-table thead th.right { text-align: right; }
+.data-table tbody tr {
+  border-bottom: 1px solid var(--border-subtle);
+  transition: background 0.1s;
+}
+.data-table tbody tr:last-child { border-bottom: none; }
+.data-table tbody tr:hover { background: var(--bg-card-hover); }
+.data-table tbody tr.clickable { cursor: pointer; }
+.data-table tbody td {
+  padding: 10px 14px;
+  color: var(--text-primary);
+  font-family: var(--mono);
+  font-size: 12px;
+}
+.data-table tbody td.right { text-align: right; }
+.data-table tbody td.muted { color: var(--text-muted); }
+.data-table tbody td .risk-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 500;
+}
+.risk-badge.high { background: var(--risk-high-bg); color: var(--risk-high); }
+.risk-badge.medium { background: var(--risk-medium-bg); color: var(--risk-medium); }
+.risk-badge.low { background: var(--risk-low-bg); color: var(--risk-low); }
+
+/* ═══ EMPTY STATE ═══ */
+.empty-state {
+  text-align: center;
+  padding: 48px 24px;
+  color: var(--text-muted);
+}
+.empty-state .empty-icon { font-size: 36px; margin-bottom: 12px; opacity: 0.5; }
+.empty-state h3 { font-size: 14px; font-weight: 600; color: var(--text-secondary); margin-bottom: 4px; }
+.empty-state p { font-size: 12px; font-family: var(--mono); }
+
+/* ═══ DRILL DOWN ═══ */
+.drilldown-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+.drilldown-back {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 12px;
+  cursor: pointer;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text-secondary);
+  transition: all 0.15s;
+}
+.drilldown-back:hover { background: var(--bg-card-hover); color: var(--text-primary); }
+.drilldown-title {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+/* ═══ EFFECTIVENESS CARDS ═══ */
+.eff-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+  margin-bottom: 20px;
+}
+.eff-card {
+  background: var(--bg-secondary);
+  border-radius: 8px;
+  padding: 16px;
+  text-align: center;
+}
+.eff-card .eff-value {
+  font-family: var(--mono);
+  font-size: 22px;
+  font-weight: 500;
+  color: var(--text-primary);
+}
+.eff-card .eff-label {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  margin-top: 4px;
+}
+
+/* ═══ PLACEHOLDER ═══ */
+.placeholder-panel {
+  border: 2px dashed var(--border);
+  border-radius: 12px;
+  padding: 60px 40px;
+  text-align: center;
+}
+.placeholder-panel .placeholder-icon { font-size: 42px; margin-bottom: 16px; opacity: 0.4; }
+.placeholder-panel h3 { font-size: 16px; font-weight: 600; color: var(--text-secondary); margin-bottom: 8px; }
+.placeholder-panel p { font-size: 13px; color: var(--text-muted); max-width: 400px; margin: 0 auto; line-height: 1.6; }
+.placeholder-panel code {
+  font-family: var(--mono);
+  background: var(--bg-secondary);
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-size: 12px;
+}
+
+/* ═══ MODAL ═══ */
+.modal-overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.5);
+  z-index: 200;
+  align-items: center;
+  justify-content: center;
+  backdrop-filter: blur(2px);
+}
+.modal-overlay.open { display: flex; }
+.modal {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  width: 440px;
+  max-width: 90vw;
+  box-shadow: var(--shadow-lg);
+  animation: fadeIn 0.15s ease;
+}
+.modal-header {
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border-subtle);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.modal-header h3 { font-size: 14px; font-weight: 600; }
+.modal-close {
+  background: none; border: none; font-size: 18px; cursor: pointer;
+  color: var(--text-muted); padding: 4px 8px; border-radius: 4px;
+}
+.modal-close:hover { background: var(--bg-secondary); color: var(--text-primary); }
+.modal-body { padding: 20px; }
+.modal-meta {
+  font-family: var(--mono); font-size: 11px; color: var(--text-muted);
+  margin-bottom: 16px; line-height: 1.6;
+}
+.modal-meta strong { color: var(--text-secondary); }
+.outcome-options { display: flex; flex-direction: column; gap: 8px; margin-bottom: 16px; }
+.outcome-opt {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 14px; border-radius: 6px; cursor: pointer;
+  border: 1px solid var(--border); transition: all 0.15s;
+  font-size: 12.5px; font-family: var(--mono);
+}
+.outcome-opt:hover { border-color: var(--accent-muted); background: var(--bg-card-hover); }
+.outcome-opt.selected { border-color: var(--accent); background: var(--bg-secondary); }
+.outcome-opt input[type="radio"] { accent-color: var(--accent); }
+.modal-notes {
+  width: 100%; padding: 10px 12px; border: 1px solid var(--border);
+  border-radius: 6px; font-family: var(--mono); font-size: 12px;
+  background: var(--bg-primary); color: var(--text-primary);
+  resize: vertical; min-height: 60px;
+}
+.modal-notes:focus { outline: none; border-color: var(--accent); }
+.modal-footer {
+  padding: 14px 20px; border-top: 1px solid var(--border-subtle);
+  display: flex; justify-content: flex-end; gap: 8px;
+}
+.btn {
+  padding: 8px 16px; border-radius: 6px; font-family: var(--mono);
+  font-size: 12px; cursor: pointer; border: 1px solid var(--border);
+  transition: all 0.15s;
+}
+.btn-cancel { background: var(--bg-secondary); color: var(--text-secondary); }
+.btn-cancel:hover { background: var(--bg-card-hover); }
+.btn-primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+.btn-primary:hover { opacity: 0.9; }
+.btn-primary:disabled { opacity: 0.4; cursor: not-allowed; }
+.btn-sm { padding: 4px 10px; font-size: 11px; }
+.btn-fraud { background: var(--risk-high); color: #fff; border-color: var(--risk-high); }
+.btn-fraud:hover { opacity: 0.9; }
+.btn-fp { background: var(--risk-low); color: #fff; border-color: var(--risk-low); }
+.btn-fp:hover { opacity: 0.9; }
+.btn-review { background: var(--risk-medium); color: #fff; border-color: var(--risk-medium); }
+.btn-review:hover { opacity: 0.9; }
+
+/* ═══ TOAST ═══ */
+.toast-container {
+  position: fixed; top: 16px; right: 16px; z-index: 300;
+  display: flex; flex-direction: column; gap: 8px;
+}
+.toast {
+  padding: 12px 20px; border-radius: 8px; font-family: var(--mono);
+  font-size: 12px; box-shadow: var(--shadow-lg); animation: slideIn 0.2s ease;
+  max-width: 360px;
+}
+.toast.success { background: #065f46; color: #d1fae5; }
+.toast.error { background: #7f1d1d; color: #fecaca; }
+@keyframes slideIn { from { opacity: 0; transform: translateX(20px); } to { opacity: 1; transform: translateX(0); } }
+
+/* ═══ LOADING ═══ */
+.loading-spinner {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 40px;
+  color: var(--text-muted);
+  font-family: var(--mono);
+  font-size: 12px;
+  gap: 8px;
+}
+.loading-spinner::before {
+  content: '';
+  width: 16px; height: 16px;
+  border: 2px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.6s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ═══ BILLING SUB-TABS ═══ */
+.sub-tabs {
+  display: flex;
+  gap: 0;
+  margin-bottom: 20px;
+  border-bottom: 1px solid var(--border);
+}
+.sub-tab {
+  padding: 10px 20px;
+  font-family: var(--mono);
+  font-size: 11.5px;
+  color: var(--text-muted);
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  transition: all 0.15s;
+  font-weight: 500;
+}
+.sub-tab:hover { color: var(--text-primary); }
+.sub-tab.active { color: var(--text-primary); border-bottom-color: var(--accent); }
+
+.sub-panel { display: none; }
+.sub-panel.active { display: block; animation: fadeIn 0.15s ease; }
+
+/* ═══ PLOTLY ═══ */
+.plotly-chart { width: 100%; min-height: 300px; }
+
+/* ═══ ACTION FORMS ═══ */
+.action-form { display: flex; flex-direction: column; gap: 16px; }
+.form-group { display: flex; flex-direction: column; gap: 6px; }
+.form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 8px; }
+.form-label {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.form-select, .form-input {
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-family: var(--mono);
+  font-size: 12px;
+  transition: border-color 0.15s;
+}
+.form-select:focus, .form-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+.form-hint {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+.btn-full { width: 100%; justify-content: center; }
+.action-status {
+  font-family: var(--mono);
+  font-size: 11px;
+  padding: 10px 12px;
+  border-radius: 6px;
+  display: none;
+}
+.action-status.running {
+  display: block;
+  background: var(--bg-secondary);
+  color: var(--accent);
+  border: 1px solid var(--accent-muted);
+}
+.action-status.success {
+  display: block;
+  background: var(--risk-low-bg);
+  color: var(--risk-low);
+  border: 1px solid var(--risk-low);
+}
+.action-status.error {
+  display: block;
+  background: var(--risk-high-bg);
+  color: var(--risk-high);
+  border: 1px solid var(--risk-high);
+}
+.activity-log { max-height: 200px; overflow-y: auto; }
+.activity-item {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border-subtle);
+  font-family: var(--mono);
+  font-size: 11px;
+}
+.activity-item:last-child { border-bottom: none; }
+.activity-item .activity-time { color: var(--text-muted); margin-right: 12px; }
+.activity-item .activity-type { 
+  display: inline-block;
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-size: 10px;
+  margin-right: 8px;
+}
+.activity-item .activity-type.fetch { background: var(--accent); color: #fff; }
+.activity-item .activity-type.analysis { background: var(--risk-medium); color: #fff; }
+.activity-empty {
+  text-align: center;
+  padding: 24px;
+  color: var(--text-muted);
+  font-family: var(--mono);
+  font-size: 12px;
+}
+.btn.loading {
+  opacity: 0.7;
+  pointer-events: none;
+}
+.btn.loading::after {
+  content: '';
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border: 2px solid rgba(255,255,255,0.3);
+  border-top-color: #fff;
+  border-radius: 50%;
+  margin-left: 8px;
+  animation: spin 0.6s linear infinite;
+}
+
+/* ═══ SEARCH & FILTER ═══ */
+.search-bar {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+.search-input {
+  flex: 1;
+  min-width: 200px;
+  padding: 10px 14px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-family: var(--mono);
+  font-size: 12px;
+}
+.search-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+.search-input::placeholder {
+  color: var(--text-muted);
+}
+.filter-select {
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-family: var(--mono);
+  font-size: 12px;
+  min-width: 120px;
+}
+.search-count {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text-muted);
+  padding: 8px 12px;
+  background: var(--bg-secondary);
+  border-radius: 4px;
+}
+
+/* ═══ EXPORT BUTTONS ═══ */
+.btn-export {
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+  border: 1px solid var(--border);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.btn-export:hover {
+  background: var(--bg-card-hover);
+  color: var(--text-primary);
+  border-color: var(--accent-muted);
+}
+.btn-icon {
+  font-size: 14px;
+}
+
+/* ═══ PROGRESS BAR ═══ */
+.progress-container {
+  margin-top: 12px;
+  display: none;
+}
+.progress-container.visible {
+  display: block;
+}
+.progress-bar {
+  height: 6px;
+  background: var(--bg-secondary);
+  border-radius: 3px;
+  overflow: hidden;
+}
+.progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--accent), var(--accent-muted));
+  border-radius: 3px;
+  transition: width 0.3s ease;
+  width: 0%;
+}
+.progress-text {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--text-muted);
+  margin-top: 4px;
+  display: flex;
+  justify-content: space-between;
+}
+
+/* ═══ KEYBOARD SHORTCUT HINTS ═══ */
+.kbd {
+  display: inline-block;
+  padding: 2px 6px;
+  font-family: var(--mono);
+  font-size: 10px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  color: var(--text-muted);
+  margin-left: 8px;
+}
+.shortcuts-help {
+  position: fixed;
+  bottom: 16px;
+  right: 16px;
+  z-index: 90;
+}
+.shortcuts-toggle {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 12px;
+  cursor: pointer;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  box-shadow: var(--shadow-md);
+}
+.shortcuts-toggle:hover {
+  color: var(--text-primary);
+  border-color: var(--accent-muted);
+}
+.shortcuts-panel {
+  display: none;
+  position: absolute;
+  bottom: 44px;
+  right: 0;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 16px;
+  min-width: 220px;
+  box-shadow: var(--shadow-lg);
+}
+.shortcuts-panel.open {
+  display: block;
+  animation: fadeIn 0.15s ease;
+}
+.shortcuts-panel h4 {
+  font-size: 12px;
+  font-weight: 600;
+  margin-bottom: 12px;
+  color: var(--text-primary);
+}
+.shortcut-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 6px 0;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text-secondary);
+  border-bottom: 1px solid var(--border-subtle);
+}
+.shortcut-row:last-child {
+  border-bottom: none;
+}
+
+/* ═══ ERROR STATE ═══ */
+.error-state {
+  text-align: center;
+  padding: 48px 24px;
+  color: var(--risk-high);
+}
+.error-state .error-icon { font-size: 36px; margin-bottom: 12px; opacity: 0.7; }
+.error-state h3 { font-size: 14px; font-weight: 600; margin-bottom: 4px; }
+.error-state p { font-size: 12px; font-family: var(--mono); color: var(--text-muted); }
+.error-state .btn { margin-top: 16px; }
+
+/* ═══ RESPONSIVE ═══ */
+@media (max-width: 768px) {
+  .sidebar { width: 56px; min-width: 56px; }
+  .sidebar-brand h1, .sidebar-brand .brand-sub, .nav-label, .nav-badge,
+  .sidebar-footer span, .theme-toggle span, .auto-refresh-toggle span { display: none; }
+  .sidebar-brand { padding: 16px 8px; text-align: center; }
+  .nav-item { justify-content: center; padding: 10px 8px; }
+  .nav-item.active::before { display: none; }
+  .main { margin-left: 56px; }
+  .content { padding: 16px; }
+  .metrics-row { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* scrollbar */
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
+</style>
+</head>
+<body>
+
+<!-- ═══ SIDEBAR ═══ -->
+<nav class="sidebar">
+  <div class="sidebar-brand">
+    <h1><span class="brand-dot"></span>FRAUD OPS</h1>
+    <div class="brand-sub">Detection Center</div>
+  </div>
+  <div class="sidebar-nav">
+    <div class="nav-item active" data-tab="overview">
+      <span class="nav-icon">◉</span>
+      <span class="nav-label">Overview</span>
+      <span class="nav-badge" id="nav-badge-high" style="display:none"></span>
+    </div>
+    <div class="nav-item" data-tab="affiliates">
+      <span class="nav-icon">⊞</span>
+      <span class="nav-label">Affiliates</span>
+    </div>
+    <div class="nav-item" data-tab="anomaly">
+      <span class="nav-icon">◈</span>
+      <span class="nav-label">Effectiveness</span>
+    </div>
+    <div class="nav-item" data-tab="drift">
+      <span class="nav-icon">⏤</span>
+      <span class="nav-label">Drift Monitor</span>
+    </div>
+    <div class="nav-item" data-tab="purchases">
+      <span class="nav-icon">⧖</span>
+      <span class="nav-label">Quick Purchases</span>
+    </div>
+    <div class="nav-item" data-tab="billing">
+      <span class="nav-icon">⊡</span>
+      <span class="nav-label">Billing Clusters</span>
+    </div>
+    <div class="nav-item" data-tab="actions">
+      <span class="nav-icon">⚡</span>
+      <span class="nav-label">Actions</span>
+    </div>
+  </div>
+  <div class="sidebar-footer">
+    <button class="auto-refresh-toggle" id="autoRefreshBtn" title="Toggle auto-refresh (30s)">
+      <span class="refresh-indicator"></span>
+      <span>Auto-refresh</span>
+    </button>
+    <button class="theme-toggle" id="themeToggle">
+      <span id="themeIcon">☀</span>
+      <span id="themeLabel">Light mode</span>
+    </button>
+  </div>
+</nav>
+
+<!-- ═══ MAIN ═══ -->
+<div class="main">
+  <header class="main-header">
+    <h2 id="pageTitle">Overview</h2>
+    <div class="header-meta">
+      <span><span class="status-dot live"></span>System active</span>
+      <span id="lastUpdated">—</span>
+    </div>
+  </header>
+
+  <div class="content">
+    <!-- ═══ TAB: OVERVIEW ═══ -->
+    <div class="tab-panel active" id="tab-overview">
+      <div class="metrics-row" id="overviewMetrics">
+        <div class="metric-card"><div class="metric-label">Total Analyzed</div><div class="metric-value" id="m-total">—</div></div>
+        <div class="metric-card"><div class="metric-label">High Risk</div><div class="metric-value high" id="m-high">—</div></div>
+        <div class="metric-card"><div class="metric-label">Medium Risk</div><div class="metric-value medium" id="m-medium">—</div></div>
+        <div class="metric-card"><div class="metric-label">Revenue at Risk</div><div class="metric-value high" id="m-revenue">—</div></div>
+      </div>
+      <div class="grid-2">
+        <div class="panel">
+          <div class="panel-header"><span class="panel-title">Risk Distribution</span></div>
+          <div class="panel-body"><div class="plotly-chart" id="chart-risk-donut"></div></div>
+        </div>
+        <div class="panel">
+          <div class="panel-header"><span class="panel-title">Risk Breakdown by Type</span></div>
+          <div class="panel-body"><div class="plotly-chart" id="chart-risk-bar"></div></div>
+        </div>
+      </div>
+      <div class="panel">
+        <div class="panel-header">
+          <span class="panel-title">Recent High-Risk Accounts</span>
+          <div style="display:flex;align-items:center;gap:12px;">
+            <span class="panel-subtitle" id="highRiskCount"></span>
+            <button class="btn btn-sm btn-export" onclick="exportData('fraud-results', {min_risk: 50})">
+              <span class="btn-icon">↓</span> Export
+            </button>
+          </div>
+        </div>
+        <div class="panel-body">
+          <div class="search-bar">
+            <input type="text" class="search-input" id="searchHighRisk" placeholder="Search by email, flags..." onkeyup="filterTable('hr', this.value)">
+            <select class="filter-select" id="filterHighRiskType" onchange="filterTable('hr')">
+              <option value="">All Types</option>
+              <option value="paid">Paid</option>
+              <option value="free">Free</option>
+            </select>
+            <span class="search-count" id="hrSearchCount"></span>
+          </div>
+        </div>
+        <div class="panel-body no-pad" id="highRiskTableWrap"></div>
+      </div>
+      <div class="panel">
+        <div class="panel-header">
+          <span class="panel-title">Pending Reviews</span>
+          <span class="panel-subtitle" id="pendingCount"></span>
+        </div>
+        <div class="panel-body no-pad" id="pendingTableWrap"></div>
+      </div>
+    </div>
+
+    <!-- ═══ TAB: AFFILIATES ═══ -->
+    <div class="tab-panel" id="tab-affiliates">
+      <div id="affiliates-main">
+        <div class="panel">
+          <div class="panel-header">
+            <span class="panel-title">Affiliate Performance</span>
+            <div style="display:flex;align-items:center;gap:12px;">
+              <span class="panel-subtitle" id="affCount"></span>
+              <button class="btn btn-sm btn-export" onclick="exportData('affiliates')">
+                <span class="btn-icon">↓</span> Export All
+              </button>
+            </div>
+          </div>
+          <div class="panel-body">
+            <div class="search-bar">
+              <input type="text" class="search-input" id="searchAffiliates" placeholder="Search affiliates..." onkeyup="filterTable('aff', this.value)">
+              <select class="filter-select" id="filterAffRisk" onchange="filterTable('aff')">
+                <option value="">All Risk Levels</option>
+                <option value="high">Has High Risk</option>
+                <option value="clean">No High Risk</option>
+              </select>
+              <span class="search-count" id="affSearchCount"></span>
+            </div>
+          </div>
+          <div class="panel-body no-pad" id="affiliatesTableWrap"></div>
+        </div>
+      </div>
+      <div id="affiliates-drill" style="display:none">
+        <div class="drilldown-header">
+          <button class="drilldown-back" onclick="closeDrilldown()">← Back</button>
+          <span class="drilldown-title" id="drillTitle"></span>
+          <button class="btn btn-sm btn-export" id="drillExportBtn" style="margin-left:auto;">
+            <span class="btn-icon">↓</span> Export
+          </button>
+        </div>
+        <div class="panel">
+          <div class="panel-header">
+            <span class="panel-title">Accounts</span>
+            <span class="panel-subtitle" id="drillCount"></span>
+          </div>
+          <div class="panel-body">
+            <div class="search-bar">
+              <input type="text" class="search-input" id="searchDrill" placeholder="Search accounts..." onkeyup="filterTable('drill', this.value)">
+              <select class="filter-select" id="filterDrillRisk" onchange="filterTable('drill')">
+                <option value="">All Risks</option>
+                <option value="50">High (50+)</option>
+                <option value="25">Medium+ (25+)</option>
+              </select>
+              <span class="search-count" id="drillSearchCount"></span>
+            </div>
+          </div>
+          <div class="panel-body no-pad" id="drillTableWrap"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══ TAB: EFFECTIVENESS ═══ -->
+    <div class="tab-panel" id="tab-anomaly">
+      <div class="eff-grid" id="effCards"></div>
+      <div class="grid-2">
+        <div class="panel">
+          <div class="panel-header"><span class="panel-title">Outcome Breakdown — High Risk</span></div>
+          <div class="panel-body"><div class="plotly-chart" id="chart-eff-high"></div></div>
+        </div>
+        <div class="panel">
+          <div class="panel-header"><span class="panel-title">Outcome Breakdown — Medium Risk</span></div>
+          <div class="panel-body"><div class="plotly-chart" id="chart-eff-medium"></div></div>
+        </div>
+      </div>
+      <div class="panel">
+        <div class="panel-header"><span class="panel-title">Cross-Affiliate Patterns</span></div>
+        <div class="panel-body no-pad" id="crossAffWrap"></div>
+      </div>
+    </div>
+
+    <!-- ═══ TAB: DRIFT ═══ -->
+    <div class="tab-panel" id="tab-drift">
+      <div class="panel">
+        <div class="panel-header">
+          <span class="panel-title">Detection Metrics Over Time</span>
+          <span class="panel-subtitle">Last 30 days</span>
+        </div>
+        <div class="panel-body"><div class="plotly-chart" id="chart-drift"></div></div>
+      </div>
+      <div class="panel">
+        <div class="panel-header">
+          <span class="panel-title">Precision Rate Trend</span>
+        </div>
+        <div class="panel-body"><div class="plotly-chart" id="chart-precision"></div></div>
+      </div>
+    </div>
+
+    <!-- ═══ TAB: QUICK PURCHASES ═══ -->
+    <div class="tab-panel" id="tab-purchases">
+      <div class="placeholder-panel">
+        <div class="placeholder-icon">⧖</div>
+        <h3>Quick Purchases — Coming Soon</h3>
+        <p>This tab will display purchases made within 4 hours of account creation — a key fraud indicator. It requires the <code>analyze_account_age_at_purchase()</code> method, which depends on account creation timestamp data not yet available via API.</p>
+        <p style="margin-top:12px">Track progress in the <strong>Developer Discussion Points</strong> section of the project docs.</p>
+      </div>
+    </div>
+
+    <!-- ═══ TAB: BILLING ═══ -->
+    <div class="tab-panel" id="tab-billing">
+      <div class="metrics-row" id="billingMetrics"></div>
+      <div class="sub-tabs">
+        <div class="sub-tab active" data-sub="billing-clusters">Shared Billing IDs</div>
+        <div class="sub-tab" data-sub="billing-names">Name Correlations</div>
+        <div class="sub-tab" data-sub="billing-ips">IP Cross-References</div>
+      </div>
+      <div class="sub-panel active" id="sub-billing-clusters">
+        <div class="panel">
+          <div class="panel-body no-pad" id="billingClustersWrap"></div>
+        </div>
+      </div>
+      <div class="sub-panel" id="sub-billing-names">
+        <div class="panel">
+          <div class="panel-body no-pad" id="billingNamesWrap"></div>
+        </div>
+      </div>
+      <div class="sub-panel" id="sub-billing-ips">
+        <div class="panel">
+          <div class="panel-body no-pad" id="billingIpsWrap"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══ TAB: ACTIONS ═══ -->
+    <div class="tab-panel" id="tab-actions">
+      <div class="grid-2">
+        <!-- Fetch Data Panel -->
+        <div class="panel">
+          <div class="panel-header">
+            <span class="panel-title">📥 Fetch New Data</span>
+          </div>
+          <div class="panel-body">
+            <div class="action-form">
+              <div class="form-group">
+                <label class="form-label">Data Type</label>
+                <select id="fetchDataType" class="form-select">
+                  <option value="both">Both (Leads + Sales)</option>
+                  <option value="free">Leads Only (Free)</option>
+                  <option value="paid">Sales Only (Paid)</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label class="form-label">Date Range</label>
+                <select id="fetchDateRange" class="form-select" onchange="toggleCustomDates()">
+                  <option value="7">Last 7 days</option>
+                  <option value="14">Last 14 days</option>
+                  <option value="30">Last 30 days</option>
+                  <option value="custom">Custom range</option>
+                </select>
+              </div>
+              <div id="customDates" style="display:none">
+                <div class="form-row">
+                  <div class="form-group">
+                    <label class="form-label">Start Date</label>
+                    <input type="date" id="fetchStartDate" class="form-input">
+                  </div>
+                  <div class="form-group">
+                    <label class="form-label">End Date</label>
+                    <input type="date" id="fetchEndDate" class="form-input">
+                  </div>
+                </div>
+              </div>
+              <button class="btn btn-primary btn-full" id="btnFetch" onclick="startFetch()">
+                <span id="fetchBtnText">Start Fetch</span>
+              </button>
+              <div id="fetchStatus" class="action-status"></div>
+              <div class="progress-container" id="fetchProgress">
+                <div class="progress-bar">
+                  <div class="progress-fill" id="fetchProgressFill"></div>
+                </div>
+                <div class="progress-text">
+                  <span id="fetchProgressText">Initializing...</span>
+                  <span id="fetchProgressPct">0%</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Run Analysis Panel -->
+        <div class="panel">
+          <div class="panel-header">
+            <span class="panel-title">🔍 Run Fraud Analysis</span>
+          </div>
+          <div class="panel-body">
+            <div class="action-form">
+              <div class="form-group">
+                <label class="form-label">Analysis Scope</label>
+                <select id="analysisScope" class="form-select">
+                  <option value="new">New data only (unanalyzed)</option>
+                  <option value="all">Re-analyze all data</option>
+                </select>
+              </div>
+              <p class="form-hint">Analysis detects fraud patterns in email addresses, POV timing, device types, and more.</p>
+              <button class="btn btn-primary btn-full" id="btnAnalysis" onclick="startAnalysis()">
+                <span id="analysisBtnText">Start Analysis</span>
+              </button>
+              <div id="analysisStatus" class="action-status"></div>
+              <div class="progress-container" id="analysisProgress">
+                <div class="progress-bar">
+                  <div class="progress-fill" id="analysisProgressFill"></div>
+                </div>
+                <div class="progress-text">
+                  <span id="analysisProgressText">Initializing...</span>
+                  <span id="analysisProgressPct">0%</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Recent Activity -->
+      <div class="panel">
+        <div class="panel-header">
+          <span class="panel-title">📋 Recent Activity</span>
+        </div>
+        <div class="panel-body">
+          <div id="recentActivity" class="activity-log">
+            <div class="activity-empty">No recent actions</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ═══ OUTCOME MODAL ═══ -->
+<div class="modal-overlay" id="outcomeModal">
+  <div class="modal">
+    <div class="modal-header">
+      <h3>Record Outcome</h3>
+      <button class="modal-close" onclick="closeModal()">&times;</button>
+    </div>
+    <div class="modal-body">
+      <div class="modal-meta">
+        <div>DUID: <strong id="modalDuid"></strong></div>
+        <div>Email: <strong id="modalEmail"></strong></div>
+      </div>
+      <div class="outcome-options" id="outcomeOptions">
+        <label class="outcome-opt" data-val="confirmed_fraud">
+          <input type="radio" name="outcome" value="confirmed_fraud"> Confirmed Fraud
+        </label>
+        <label class="outcome-opt" data-val="false_positive">
+          <input type="radio" name="outcome" value="false_positive"> False Positive
+        </label>
+        <label class="outcome-opt" data-val="under_review">
+          <input type="radio" name="outcome" value="under_review"> Under Review
+        </label>
+      </div>
+      <textarea class="modal-notes" id="outcomeNotes" placeholder="Optional notes..."></textarea>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-cancel" onclick="closeModal()">Cancel</button>
+      <button class="btn btn-primary" id="outcomeSubmit" disabled onclick="submitOutcome()">Submit</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast-container" id="toastContainer"></div>
+
+<!-- Keyboard Shortcuts Help -->
+<div class="shortcuts-help">
+  <button class="shortcuts-toggle" onclick="toggleShortcuts()" title="Keyboard shortcuts">
+    <span>⌨</span> <span class="kbd">?</span>
+  </button>
+  <div class="shortcuts-panel" id="shortcutsPanel">
+    <h4>Keyboard Shortcuts</h4>
+    <div class="shortcut-row"><span>Overview</span><span class="kbd">1</span></div>
+    <div class="shortcut-row"><span>Affiliates</span><span class="kbd">2</span></div>
+    <div class="shortcut-row"><span>Effectiveness</span><span class="kbd">3</span></div>
+    <div class="shortcut-row"><span>Drift Monitor</span><span class="kbd">4</span></div>
+    <div class="shortcut-row"><span>Billing</span><span class="kbd">5</span></div>
+    <div class="shortcut-row"><span>Actions</span><span class="kbd">6</span></div>
+    <div class="shortcut-row"><span>Toggle theme</span><span class="kbd">T</span></div>
+    <div class="shortcut-row"><span>Toggle refresh</span><span class="kbd">R</span></div>
+    <div class="shortcut-row"><span>Focus search</span><span class="kbd">/</span></div>
+    <div class="shortcut-row"><span>Close/back</span><span class="kbd">Esc</span></div>
+  </div>
+</div>
+
+<script>
+/* ═══════════════════════════════════════════════════════════
+   FRAUD DETECTION DASHBOARD — CLIENT
+   ═══════════════════════════════════════════════════════════ */
+
+// ─── State ───
+let currentTab = 'overview';
+let autoRefresh = false;
+let refreshTimer = null;
+let sortState = {};
+let filterState = {};
+let rawDataCache = {};  // Store unfiltered data for search/filter
+let currentDrillAffiliate = null;
+
+// ─── Theme ───
+function initTheme() {
+  const saved = localStorage.getItem('fd-theme') || 'dark';
+  document.documentElement.setAttribute('data-theme', saved);
+  updateThemeUI(saved);
+}
+function toggleTheme() {
+  const current = document.documentElement.getAttribute('data-theme');
+  const next = current === 'dark' ? 'light' : 'dark';
+  document.documentElement.setAttribute('data-theme', next);
+  localStorage.setItem('fd-theme', next);
+  updateThemeUI(next);
+  replotAll();
+}
+function updateThemeUI(theme) {
+  document.getElementById('themeIcon').textContent = theme === 'dark' ? '☀' : '☽';
+  document.getElementById('themeLabel').textContent = theme === 'dark' ? 'Light mode' : 'Dark mode';
+}
+function getPlotlyTemplate() {
+  return document.documentElement.getAttribute('data-theme') === 'dark' ? 'plotly_dark' : 'plotly_white';
+}
+function plotlyLayout(extra = {}) {
+  const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+  return Object.assign({
+    template: getPlotlyTemplate(),
+    paper_bgcolor: 'rgba(0,0,0,0)',
+    plot_bgcolor: 'rgba(0,0,0,0)',
+    font: { family: 'DM Mono, monospace', size: 11, color: isDark ? '#94a3b8' : '#555' },
+    margin: { t: 24, r: 20, b: 40, l: 50 },
+    autosize: true
+  }, extra);
+}
+
+// ─── Navigation ───
+document.querySelectorAll('.nav-item').forEach(item => {
+  item.addEventListener('click', () => switchTab(item.dataset.tab));
+});
+
+const tabTitles = {
+  overview: 'Overview',
+  affiliates: 'Affiliates',
+  anomaly: 'Effectiveness',
+  drift: 'Drift Monitor',
+  purchases: 'Quick Purchases',
+  billing: 'Billing Clusters',
+  actions: 'Actions'
+};
+
+function switchTab(tab) {
+  currentTab = tab;
+  document.querySelectorAll('.nav-item').forEach(n => n.classList.toggle('active', n.dataset.tab === tab));
+  document.querySelectorAll('.tab-panel').forEach(p => p.classList.toggle('active', p.id === 'tab-' + tab));
+  document.getElementById('pageTitle').textContent = tabTitles[tab] || tab;
+  loadTabData(tab);
+}
+
+// ─── Sub-tabs (billing) ───
+document.querySelectorAll('.sub-tab').forEach(st => {
+  st.addEventListener('click', () => {
+    document.querySelectorAll('.sub-tab').forEach(s => s.classList.toggle('active', s === st));
+    document.querySelectorAll('.sub-panel').forEach(p => p.classList.toggle('active', p.id === 'sub-' + st.dataset.sub));
+  });
+});
+
+// ─── Auto-refresh ───
+document.getElementById('autoRefreshBtn').addEventListener('click', () => {
+  autoRefresh = !autoRefresh;
+  document.getElementById('autoRefreshBtn').classList.toggle('active', autoRefresh);
+  if (autoRefresh) {
+    refreshTimer = setInterval(() => loadTabData(currentTab), 30000);
+  } else {
+    clearInterval(refreshTimer);
+  }
+});
+
+document.getElementById('themeToggle').addEventListener('click', toggleTheme);
+
+// ─── Helpers ───
+function fmt(n) { return n == null ? '—' : Number(n).toLocaleString(); }
+function fmtCur(n) { return n == null ? '—' : '$' + Number(n).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 }); }
+function fmtPct(n) { return n == null ? 'N/A' : (n * 100).toFixed(1) + '%'; }
+function riskBadge(score) {
+  if (score >= 50) return `<span class="risk-badge high">${score}</span>`;
+  if (score >= 25) return `<span class="risk-badge medium">${score}</span>`;
+  return `<span class="risk-badge low">${score}</span>`;
+}
+function emptyState(icon, title, desc) {
+  return `<div class="empty-state"><div class="empty-icon">${icon}</div><h3>${title}</h3><p>${desc}</p></div>`;
+}
+function errorState(title, desc, retry) {
+  return `<div class="error-state"><div class="error-icon">⚠</div><h3>${title}</h3><p>${desc}</p>${retry ? `<button class="btn btn-primary" onclick="${retry}">Retry</button>` : ''}</div>`;
+}
+function loading() { return '<div class="loading-spinner">Loading data…</div>'; }
+function truncate(s, n) { return s && s.length > n ? s.slice(0, n) + '…' : (s || '—'); }
+
+async function api(path) {
+  try {
+    const r = await fetch(path);
+    if (!r.ok) {
+      const err = await r.json().catch(() => ({ error: `HTTP ${r.status}` }));
+      throw new Error(err.error || `HTTP ${r.status}`);
+    }
+    return { data: await r.json(), error: null };
+  } catch (e) {
+    console.error(`API error ${path}:`, e);
+    return { data: null, error: e.message };
+  }
+}
+
+// ─── Keyboard Shortcuts ───
+function toggleShortcuts() {
+  document.getElementById('shortcutsPanel').classList.toggle('open');
+}
+
+document.addEventListener('keydown', e => {
+  // Ignore if typing in input/textarea
+  if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT') {
+    if (e.key === 'Escape') e.target.blur();
+    return;
+  }
+  
+  // Close modals/panels on Escape
+  if (e.key === 'Escape') {
+    closeModal();
+    closeDrilldown();
+    document.getElementById('shortcutsPanel').classList.remove('open');
+    return;
+  }
+  
+  // Number keys for tabs
+  const tabMap = { '1': 'overview', '2': 'affiliates', '3': 'anomaly', '4': 'drift', '5': 'billing', '6': 'actions' };
+  if (tabMap[e.key]) {
+    switchTab(tabMap[e.key]);
+    return;
+  }
+  
+  // Other shortcuts
+  switch (e.key.toLowerCase()) {
+    case 't':
+      toggleTheme();
+      break;
+    case 'r':
+      document.getElementById('autoRefreshBtn').click();
+      break;
+    case '/':
+      e.preventDefault();
+      focusCurrentSearch();
+      break;
+    case '?':
+      toggleShortcuts();
+      break;
+  }
+});
+
+function focusCurrentSearch() {
+  const searchIds = {
+    overview: 'searchHighRisk',
+    affiliates: 'searchAffiliates',
+    billing: 'searchBilling'
+  };
+  const id = searchIds[currentTab];
+  if (id) {
+    const el = document.getElementById(id);
+    if (el) el.focus();
+  }
+}
+
+// ─── Export Functions ───
+function exportData(type, params = {}) {
+  let url = `/api/export/${type}`;
+  const queryParams = new URLSearchParams(params).toString();
+  if (queryParams) url += '?' + queryParams;
+  
+  // Create hidden link and click
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = '';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  
+  showToast('Download started...');
+}
+
+function exportAffiliate(code) {
+  exportData(`affiliate/${encodeURIComponent(code)}`);
+}
+
+// ─── Search & Filter ───
+function filterTable(tableId, searchText) {
+  const rawData = rawDataCache[tableId];
+  if (!rawData || !rawData.length) return;
+  
+  // Get current search text
+  searchText = searchText ?? '';
+  const searchLower = searchText.toLowerCase().trim();
+  
+  // Get filter values based on table
+  let filterFn = () => true;
+  
+  if (tableId === 'hr') {
+    const typeFilter = document.getElementById('filterHighRiskType')?.value;
+    filterFn = row => {
+      if (typeFilter && row.data_type !== typeFilter) return false;
+      return true;
+    };
+  } else if (tableId === 'aff') {
+    const riskFilter = document.getElementById('filterAffRisk')?.value;
+    filterFn = row => {
+      if (riskFilter === 'high' && (row.high_risk_count || 0) === 0) return false;
+      if (riskFilter === 'clean' && (row.high_risk_count || 0) > 0) return false;
+      return true;
+    };
+  } else if (tableId === 'drill') {
+    const riskFilter = document.getElementById('filterDrillRisk')?.value;
+    filterFn = row => {
+      if (riskFilter && (row.risk_score || 0) < parseInt(riskFilter)) return false;
+      return true;
+    };
+  }
+  
+  // Apply search and filter
+  const filtered = rawData.filter(row => {
+    if (!filterFn(row)) return false;
+    if (!searchLower) return true;
+    
+    // Search across relevant fields
+    const searchFields = ['email', 'flags', 'webmaster_code', 'campaign', 'duid'];
+    return searchFields.some(field => {
+      const val = row[field];
+      return val && String(val).toLowerCase().includes(searchLower);
+    });
+  });
+  
+  // Update count display
+  const countEl = document.getElementById(`${tableId}SearchCount`);
+  if (countEl) {
+    if (searchLower || filtered.length !== rawData.length) {
+      countEl.textContent = `${filtered.length} of ${rawData.length}`;
+    } else {
+      countEl.textContent = '';
+    }
+  }
+  
+  // Re-render table with filtered data
+  renderFilteredTable(tableId, filtered);
+}
+
+function renderFilteredTable(tableId, data) {
+  const configs = {
+    hr: {
+      wrap: 'highRiskTableWrap',
+      columns: [
+        { key: 'email', label: 'Email', render: v => truncate(v, 36) },
+        { key: 'risk_score', label: 'Risk', numeric: true, right: true, render: v => riskBadge(v) },
+        { key: 'payout_amount', label: 'Payout', numeric: true, right: true, render: v => fmtCur(v) },
+        { key: 'webmaster_code', label: 'Affiliate', muted: true, render: v => v || '—' },
+        { key: 'flags', label: 'Flags', muted: true, render: v => truncate(String(v), 40) }
+      ],
+      opts: { clickable: true, onClick: 'openHighRiskModal', emptyIcon: '⊘', emptyTitle: 'No matching accounts' }
+    },
+    aff: {
+      wrap: 'affiliatesTableWrap',
+      columns: [
+        { key: 'webmaster_code', label: 'Affiliate' },
+        { key: 'total_accounts', label: 'Total', numeric: true, right: true, render: v => fmt(v) },
+        { key: 'high_risk_count', label: 'High', numeric: true, right: true, render: v => `<span style="color:var(--risk-high)">${fmt(v)}</span>` },
+        { key: 'medium_risk_count', label: 'Med', numeric: true, right: true, render: v => `<span style="color:var(--risk-medium)">${fmt(v)}</span>` },
+        { key: 'high_risk_pct', label: 'High %', numeric: true, right: true, render: v => (v != null ? v.toFixed(1) + '%' : '—') },
+        { key: 'avg_risk_score', label: 'Avg Risk', numeric: true, right: true, render: v => v != null ? v.toFixed(0) : '—' },
+        { key: 'high_risk_payout', label: 'HR Payout', numeric: true, right: true, render: v => fmtCur(v) }
+      ],
+      opts: { clickable: true, onClick: 'drillAffiliate', emptyIcon: '⊞', emptyTitle: 'No matching affiliates' }
+    },
+    drill: {
+      wrap: 'drillTableWrap',
+      columns: [
+        { key: 'email', label: 'Email', render: v => truncate(v, 36) },
+        { key: 'risk_score', label: 'Risk', numeric: true, right: true, render: v => riskBadge(v) },
+        { key: 'payout_amount', label: 'Payout', numeric: true, right: true, render: v => fmtCur(v) },
+        { key: 'campaign', label: 'Campaign', muted: true },
+        { key: 'flags', label: 'Flags', muted: true, render: v => truncate(String(v), 40) }
+      ],
+      opts: { clickable: true, onClick: 'openDrillModal', emptyIcon: '⊘', emptyTitle: 'No matching accounts' }
+    }
+  };
+  
+  const config = configs[tableId];
+  if (!config) return;
+  
+  // Need to update the data reference for click handlers
+  if (tableId === 'hr') _highRiskData = data;
+  else if (tableId === 'aff') affiliatesData = data;
+  else if (tableId === 'drill') _drillData = data;
+  
+  document.getElementById(config.wrap).innerHTML = buildTable(tableId, config.columns, data, config.opts);
+}
+
+// ─── Toast ───
+function showToast(msg, type = 'success') {
+  const c = document.getElementById('toastContainer');
+  const t = document.createElement('div');
+  t.className = 'toast ' + type;
+  t.textContent = msg;
+  c.appendChild(t);
+  setTimeout(() => { t.style.opacity = '0'; setTimeout(() => t.remove(), 300); }, 3000);
+}
+
+// ─── Outcome Modal ───
+let _modalDuid = null;
+function openOutcomeModal(duid, email) {
+  _modalDuid = duid;
+  document.getElementById('modalDuid').textContent = duid || '—';
+  document.getElementById('modalEmail').textContent = email || '—';
+  document.getElementById('outcomeNotes').value = '';
+  document.querySelectorAll('#outcomeOptions input').forEach(r => r.checked = false);
+  document.querySelectorAll('.outcome-opt').forEach(o => o.classList.remove('selected'));
+  document.getElementById('outcomeSubmit').disabled = true;
+  document.getElementById('outcomeModal').classList.add('open');
+}
+function closeModal() {
+  document.getElementById('outcomeModal').classList.remove('open');
+  _modalDuid = null;
+}
+document.querySelectorAll('#outcomeOptions .outcome-opt').forEach(opt => {
+  opt.addEventListener('click', () => {
+    opt.querySelector('input').checked = true;
+    document.querySelectorAll('.outcome-opt').forEach(o => o.classList.remove('selected'));
+    opt.classList.add('selected');
+    document.getElementById('outcomeSubmit').disabled = false;
+  });
+});
+document.getElementById('outcomeModal').addEventListener('click', e => {
+  if (e.target === e.currentTarget) closeModal();
+});
+async function submitOutcome() {
+  const outcome = document.querySelector('#outcomeOptions input:checked')?.value;
+  if (!outcome || !_modalDuid) return;
+  const notes = document.getElementById('outcomeNotes').value.trim();
+  document.getElementById('outcomeSubmit').disabled = true;
+  try {
+    const r = await fetch('/api/outcomes', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ duid: _modalDuid, outcome, notes })
+    });
+    const data = await r.json();
+    if (r.ok) {
+      showToast('Outcome recorded for ' + _modalDuid);
+      closeModal();
+      loadTabData(currentTab);
+    } else {
+      showToast(data.error || 'Failed to record outcome', 'error');
+    }
+  } catch (e) {
+    showToast('Network error: ' + e.message, 'error');
+  }
+  document.getElementById('outcomeSubmit').disabled = false;
+}
+
+// ─── Pending review inline actions ───
+let _pendingData = [];
+async function pendingAction(idx, outcome) {
+  const row = _pendingData[idx];
+  if (!row) return;
+  try {
+    const r = await fetch('/api/outcomes', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ duid: row.duid, outcome, notes: '' })
+    });
+    const data = await r.json();
+    if (r.ok) {
+      showToast('Marked ' + row.duid + ' as ' + outcome.replace('_', ' '));
+      loadTabData(currentTab);
+    } else {
+      showToast(data.error || 'Failed', 'error');
+    }
+  } catch (e) {
+    showToast('Network error', 'error');
+  }
+}
+
+// ─── Sortable Table Builder ───
+function buildTable(id, columns, rows, opts = {}) {
+  if (!rows || rows.length === 0) {
+    return emptyState(opts.emptyIcon || '◌', opts.emptyTitle || 'No data', opts.emptyDesc || 'No records available yet.');
+  }
+
+  if (!sortState[id]) sortState[id] = { col: null, dir: 'desc' };
+
+  const state = sortState[id];
+  if (state.col !== null) {
+    const col = columns[state.col];
+    rows = [...rows].sort((a, b) => {
+      let va = a[col.key], vb = b[col.key];
+      if (col.numeric) { va = Number(va) || 0; vb = Number(vb) || 0; }
+      else { va = String(va || '').toLowerCase(); vb = String(vb || '').toLowerCase(); }
+      if (va < vb) return state.dir === 'asc' ? -1 : 1;
+      if (va > vb) return state.dir === 'asc' ? 1 : -1;
+      return 0;
+    });
+  }
+
+  let html = '<table class="data-table"><thead><tr>';
+  columns.forEach((col, i) => {
+    const cls = [col.right ? 'right' : '', state.col === i ? (state.dir === 'asc' ? 'sorted-asc' : 'sorted-desc') : ''].filter(Boolean).join(' ');
+    html += `<th class="${cls}" data-table-id="${id}" data-col="${i}">${col.label}</th>`;
+  });
+  html += '</tr></thead><tbody>';
+  rows.forEach((row, ri) => {
+    const cls = opts.clickable ? 'clickable' : '';
+    const click = opts.clickable ? `onclick="${opts.onClick}(${ri})"` : '';
+    html += `<tr class="${cls}" ${click}>`;
+    columns.forEach(col => {
+      const val = col.render ? col.render(row[col.key], row) : (row[col.key] ?? '—');
+      html += `<td class="${col.right ? 'right' : ''} ${col.muted ? 'muted' : ''}">${val}</td>`;
+    });
+    html += '</tr>';
+  });
+  html += '</tbody></table>';
+  return html;
+}
+
+// Global sort handler
+document.addEventListener('click', e => {
+  const th = e.target.closest('th[data-table-id]');
+  if (!th) return;
+  const id = th.dataset.tableId;
+  const col = parseInt(th.dataset.col);
+  if (!sortState[id]) sortState[id] = { col: null, dir: 'desc' };
+  if (sortState[id].col === col) {
+    sortState[id].dir = sortState[id].dir === 'asc' ? 'desc' : 'asc';
+  } else {
+    sortState[id].col = col;
+    sortState[id].dir = 'desc';
+  }
+  loadTabData(currentTab);
+});
+
+// ─── Data cache for drill-down ───
+let affiliatesData = [];
+let _drillData = [];
+let _pendingReplots = [];
+
+function replotAll() {
+  loadTabData(currentTab);
+}
+
+// ═══════════════════════════════════════════════════════════
+// TAB DATA LOADERS
+// ═══════════════════════════════════════════════════════════
+
+async function loadTabData(tab) {
+  document.getElementById('lastUpdated').textContent = new Date().toLocaleTimeString();
+
+  switch (tab) {
+    case 'overview': return loadOverview();
+    case 'affiliates': return loadAffiliates();
+    case 'anomaly': return loadEffectiveness();
+    case 'drift': return loadDrift();
+    case 'billing': return loadBilling();
+  }
+}
+
+// ─── Overview ───
+let _highRiskData = [];
+async function loadOverview() {
+  const [statsRes, highRiskRes, pendingRes] = await Promise.all([
+    api('/api/stats'),
+    api('/api/fraud-results?min_risk=50&limit=100'),
+    api('/api/pending-reviews')
+  ]);
+
+  // Handle stats
+  if (statsRes.error) {
+    showToast('Failed to load stats: ' + statsRes.error, 'error');
+  }
+  const stats = statsRes.data;
+  
+  if (stats) {
+    document.getElementById('m-total').textContent = fmt(stats.total_analyzed);
+    document.getElementById('m-high').textContent = fmt(stats.high_risk);
+    document.getElementById('m-medium').textContent = fmt(stats.medium_risk);
+    document.getElementById('m-revenue').textContent = fmtCur(stats.revenue_at_risk);
+
+    // Badge in nav
+    const badge = document.getElementById('nav-badge-high');
+    if (stats.high_risk > 0) {
+      badge.textContent = stats.high_risk;
+      badge.style.display = '';
+    } else {
+      badge.style.display = 'none';
+    }
+
+    // Donut
+    const total = stats.total_analyzed || 1;
+    const low = total - stats.high_risk - stats.medium_risk;
+    Plotly.react('chart-risk-donut', [{
+      values: [stats.high_risk, stats.medium_risk, low],
+      labels: ['High Risk', 'Medium Risk', 'Low Risk'],
+      type: 'pie',
+      hole: 0.55,
+      marker: { colors: ['#ef4444', '#f59e0b', '#22c55e'] },
+      textinfo: 'label+percent',
+      textfont: { family: 'DM Mono', size: 11 },
+      hoverinfo: 'label+value+percent'
+    }], plotlyLayout({ margin: { t: 10, b: 10, l: 10, r: 10 }, showlegend: false, height: 280 }),
+    { responsive: true, displayModeBar: false });
+
+    // Bar
+    Plotly.react('chart-risk-bar', [
+      { x: ['High', 'Medium', 'Low'], y: [stats.high_risk, stats.medium_risk, low],
+        type: 'bar', marker: { color: ['#ef4444', '#f59e0b', '#22c55e'], borderRadius: 4 } }
+    ], plotlyLayout({ height: 280, yaxis: { gridcolor: 'var(--plotly-grid)' }, xaxis: {} }),
+    { responsive: true, displayModeBar: false });
+  }
+
+  // High-risk table (clickable for outcome modal)
+  const highRisk = highRiskRes.data;
+  const wrap = document.getElementById('highRiskTableWrap');
+  
+  if (highRiskRes.error) {
+    wrap.innerHTML = errorState('Failed to load data', highRiskRes.error, 'loadOverview()');
+  } else if (!highRisk || highRisk.length === 0) {
+    wrap.innerHTML = emptyState('⊘', 'No high-risk accounts', 'Run fraud analysis to populate this view.');
+    _highRiskData = [];
+    rawDataCache.hr = [];
+  } else {
+    _highRiskData = highRisk;
+    rawDataCache.hr = [...highRisk];  // Cache for filtering
+    document.getElementById('highRiskCount').textContent = highRisk.length + ' accounts';
+    wrap.innerHTML = buildTable('hr', [
+      { key: 'email', label: 'Email', render: v => truncate(v, 36) },
+      { key: 'risk_score', label: 'Risk', numeric: true, right: true, render: (v) => riskBadge(v) },
+      { key: 'payout_amount', label: 'Payout', numeric: true, right: true, render: v => fmtCur(v) },
+      { key: 'webmaster_code', label: 'Affiliate', muted: true, render: v => v || '—' },
+      { key: 'flags', label: 'Flags', muted: true, render: v => truncate(String(v), 40) }
+    ], _highRiskData, { clickable: true, onClick: 'openHighRiskModal', emptyIcon: '⊘', emptyTitle: 'No high-risk accounts' });
+  }
+
+  // Pending reviews
+  const pending = pendingRes.data;
+  _pendingData = pending || [];
+  const pWrap = document.getElementById('pendingTableWrap');
+  document.getElementById('pendingCount').textContent = _pendingData.length + ' pending';
+  if (_pendingData.length === 0) {
+    pWrap.innerHTML = emptyState('✓', 'All caught up', 'No unreviewed high-risk accounts.');
+  } else {
+    pWrap.innerHTML = buildTable('pend', [
+      { key: 'email', label: 'Email', render: v => truncate(v, 30) },
+      { key: 'risk_score', label: 'Risk', numeric: true, right: true, render: v => riskBadge(v) },
+      { key: 'payout_amount', label: 'Payout', numeric: true, right: true, render: v => fmtCur(v) },
+      { key: 'duid', label: 'Actions', render: (v, row, ri) =>
+        `<button class="btn btn-sm btn-fraud" onclick="event.stopPropagation();pendingAction(${_pendingData.indexOf(row)},'confirmed_fraud')">Fraud</button> ` +
+        `<button class="btn btn-sm btn-fp" onclick="event.stopPropagation();pendingAction(${_pendingData.indexOf(row)},'false_positive')">FP</button> ` +
+        `<button class="btn btn-sm btn-review" onclick="event.stopPropagation();pendingAction(${_pendingData.indexOf(row)},'under_review')">Review</button>`
+      }
+    ], _pendingData, { clickable: true, onClick: 'openPendingModal', emptyIcon: '✓', emptyTitle: 'All caught up' });
+  }
+}
+
+function openHighRiskModal(idx) {
+  const row = _highRiskData[idx];
+  if (row) openOutcomeModal(row.duid, row.email);
+}
+function openPendingModal(idx) {
+  const row = _pendingData[idx];
+  if (row) openOutcomeModal(row.duid, row.email);
+}
+
+// ─── Affiliates ───
+async function loadAffiliates() {
+  const res = await api('/api/affiliates');
+  const wrap = document.getElementById('affiliatesTableWrap');
+  
+  document.getElementById('affiliates-main').style.display = '';
+  document.getElementById('affiliates-drill').style.display = 'none';
+  
+  if (res.error) {
+    wrap.innerHTML = errorState('Failed to load affiliates', res.error, 'loadAffiliates()');
+    return;
+  }
+  
+  affiliatesData = res.data || [];
+  rawDataCache.aff = [...affiliatesData];  // Cache for filtering
+  document.getElementById('affCount').textContent = affiliatesData.length + ' affiliates';
+  
+  // Clear search when reloading
+  const searchInput = document.getElementById('searchAffiliates');
+  if (searchInput) searchInput.value = '';
+  const filterSelect = document.getElementById('filterAffRisk');
+  if (filterSelect) filterSelect.value = '';
+
+  wrap.innerHTML = buildTable('aff', [
+    { key: 'webmaster_code', label: 'Affiliate' },
+    { key: 'total_accounts', label: 'Total', numeric: true, right: true, render: v => fmt(v) },
+    { key: 'high_risk_count', label: 'High', numeric: true, right: true, render: v => `<span style="color:var(--risk-high)">${fmt(v)}</span>` },
+    { key: 'medium_risk_count', label: 'Med', numeric: true, right: true, render: v => `<span style="color:var(--risk-medium)">${fmt(v)}</span>` },
+    { key: 'high_risk_pct', label: 'High %', numeric: true, right: true, render: v => (v != null ? v.toFixed(1) + '%' : '—') },
+    { key: 'avg_risk_score', label: 'Avg Risk', numeric: true, right: true, render: v => v != null ? v.toFixed(0) : '—' },
+    { key: 'high_risk_payout', label: 'HR Payout', numeric: true, right: true, render: v => fmtCur(v) }
+  ], affiliatesData, { clickable: true, onClick: 'drillAffiliate', emptyIcon: '⊞', emptyTitle: 'No affiliates', emptyDesc: 'Run fraud analysis with affiliate data first.' });
+}
+
+async function drillAffiliate(idx) {
+  const aff = affiliatesData[idx];
+  if (!aff) return;
+  
+  currentDrillAffiliate = aff.webmaster_code;
+  document.getElementById('affiliates-main').style.display = 'none';
+  document.getElementById('affiliates-drill').style.display = '';
+  document.getElementById('drillTitle').textContent = 'Affiliate: ' + aff.webmaster_code;
+  document.getElementById('drillTableWrap').innerHTML = loading();
+  
+  // Setup export button
+  document.getElementById('drillExportBtn').onclick = () => exportAffiliate(currentDrillAffiliate);
+  
+  // Clear search
+  const searchInput = document.getElementById('searchDrill');
+  if (searchInput) searchInput.value = '';
+  const filterSelect = document.getElementById('filterDrillRisk');
+  if (filterSelect) filterSelect.value = '';
+
+  const res = await api('/api/affiliate/' + encodeURIComponent(aff.webmaster_code) + '/details');
+  
+  if (res.error) {
+    document.getElementById('drillTableWrap').innerHTML = errorState('Failed to load affiliate details', res.error);
+    return;
+  }
+  
+  _drillData = res.data || [];
+  rawDataCache.drill = [..._drillData];  // Cache for filtering
+  document.getElementById('drillCount').textContent = _drillData.length + ' accounts';
+  document.getElementById('drillTableWrap').innerHTML = buildTable('drill', [
+    { key: 'email', label: 'Email', render: v => truncate(v, 36) },
+    { key: 'risk_score', label: 'Risk', numeric: true, right: true, render: v => riskBadge(v) },
+    { key: 'payout_amount', label: 'Payout', numeric: true, right: true, render: v => fmtCur(v) },
+    { key: 'campaign', label: 'Campaign', muted: true },
+    { key: 'flags', label: 'Flags', muted: true, render: v => truncate(String(v), 40) }
+  ], _drillData, { clickable: true, onClick: 'openDrillModal', emptyIcon: '⊘', emptyTitle: 'No accounts found' });
+}
+function openDrillModal(idx) {
+  const row = _drillData[idx];
+  if (row) openOutcomeModal(row.duid, row.email);
+}
+function closeDrilldown() {
+  document.getElementById('affiliates-main').style.display = '';
+  document.getElementById('affiliates-drill').style.display = 'none';
+}
+
+// ─── Effectiveness ───
+async function loadEffectiveness() {
+  const [eff, crossAff] = await Promise.all([
+    api('/api/effectiveness'),
+    api('/api/cross-affiliate')
+  ]);
+
+  const cards = document.getElementById('effCards');
+  if (eff) {
+    cards.innerHTML = [
+      { v: fmt(eff.total_flagged_high), l: 'Flagged High' },
+      { v: fmt(eff.reviewed_high), l: 'Reviewed High' },
+      { v: fmt(eff.confirmed_fraud_high), l: 'Confirmed Fraud' },
+      { v: fmt(eff.false_positives_high), l: 'False Positives' },
+      { v: fmtPct(eff.precision_high), l: 'Precision (High)' },
+      { v: fmtCur(eff.total_payout_at_risk), l: 'Payout at Risk' },
+      { v: fmtCur(eff.confirmed_fraud_amount), l: 'Confirmed Loss' },
+      { v: fmtCur(eff.recovery_amount), l: 'Recovered' }
+    ].map(c => `<div class="eff-card"><div class="eff-value">${c.v}</div><div class="eff-label">${c.l}</div></div>`).join('');
+
+    // Pie charts for outcomes
+    const highData = [eff.confirmed_fraud_high || 0, eff.false_positives_high || 0,
+                      (eff.reviewed_high || 0) - (eff.confirmed_fraud_high || 0) - (eff.false_positives_high || 0)];
+    const medData = [eff.confirmed_fraud_medium || 0, eff.false_positives_medium || 0,
+                     (eff.reviewed_medium || 0) - (eff.confirmed_fraud_medium || 0) - (eff.false_positives_medium || 0)];
+
+    function outcomePie(el, data) {
+      if (data.every(v => v === 0)) {
+        document.getElementById(el).closest('.panel-body').innerHTML = emptyState('◌', 'No reviews yet', 'Record outcomes to see breakdown.');
+        return;
+      }
+      Plotly.react(el, [{
+        values: data, labels: ['Confirmed Fraud', 'False Positive', 'Under Review'],
+        type: 'pie', hole: 0.45,
+        marker: { colors: ['#ef4444', '#22c55e', '#f59e0b'] },
+        textinfo: 'label+percent', textfont: { family: 'DM Mono', size: 10 }
+      }], plotlyLayout({ height: 260, margin: { t: 10, b: 10, l: 10, r: 10 }, showlegend: false }),
+      { responsive: true, displayModeBar: false });
+    }
+    outcomePie('chart-eff-high', highData);
+    outcomePie('chart-eff-medium', medData);
+  } else {
+    cards.innerHTML = emptyState('◈', 'No effectiveness data', 'Record fraud outcomes first.');
+  }
+
+  // Cross-affiliate patterns
+  const crossWrap = document.getElementById('crossAffWrap');
+  if (crossAff && crossAff.cross_affiliate_domains && crossAff.cross_affiliate_domains.length > 0) {
+    crossWrap.innerHTML = buildTable('xaff', [
+      { key: 'domain', label: 'Domain' },
+      { key: 'affiliates', label: 'Affiliates', numeric: true, right: true },
+      { key: 'accounts', label: 'Accounts', numeric: true, right: true },
+      { key: 'avg_risk', label: 'Avg Risk', numeric: true, right: true, render: v => v != null ? v.toFixed(0) : '—' }
+    ], crossAff.cross_affiliate_domains, { emptyIcon: '⊞', emptyTitle: 'No cross-affiliate patterns' });
+  } else {
+    crossWrap.innerHTML = emptyState('⊞', 'No cross-affiliate patterns', 'Patterns appear when domains or IPs span multiple affiliates.');
+  }
+}
+
+// ─── Drift ───
+async function loadDrift() {
+  const data = await api('/api/metrics-history?days=30');
+  if (!data || data.length === 0) {
+    document.getElementById('chart-drift').closest('.panel-body').innerHTML = emptyState('⏤', 'No metrics history', 'Metrics are recorded when you run the effectiveness dashboard in the CLI.');
+    document.getElementById('chart-precision').closest('.panel-body').innerHTML = '';
+    return;
+  }
+
+  // Group by date
+  const byDate = {};
+  data.forEach(r => {
+    if (!byDate[r.metric_date]) byDate[r.metric_date] = {};
+    byDate[r.metric_date][r.risk_tier] = r;
+  });
+  const dates = Object.keys(byDate).sort();
+
+  const highFlagged = dates.map(d => byDate[d].high?.total_flagged || 0);
+  const medFlagged = dates.map(d => byDate[d].medium?.total_flagged || 0);
+  const lowFlagged = dates.map(d => byDate[d].low?.total_flagged || 0);
+
+  Plotly.react('chart-drift', [
+    { x: dates, y: highFlagged, name: 'High Risk', type: 'scatter', mode: 'lines+markers', line: { color: '#ef4444', width: 2 }, marker: { size: 5 } },
+    { x: dates, y: medFlagged, name: 'Medium Risk', type: 'scatter', mode: 'lines+markers', line: { color: '#f59e0b', width: 2 }, marker: { size: 5 } },
+    { x: dates, y: lowFlagged, name: 'Low Risk', type: 'scatter', mode: 'lines+markers', line: { color: '#22c55e', width: 2 }, marker: { size: 5 } }
+  ], plotlyLayout({ height: 320, legend: { orientation: 'h', y: -0.15 }, yaxis: { title: 'Flagged Accounts' } }),
+  { responsive: true, displayModeBar: false });
+
+  // Precision
+  const precHigh = dates.map(d => byDate[d].high?.precision_rate);
+  const precMed = dates.map(d => byDate[d].medium?.precision_rate);
+
+  Plotly.react('chart-precision', [
+    { x: dates, y: precHigh.map(v => v != null ? v * 100 : null), name: 'High Risk Precision', type: 'scatter', mode: 'lines+markers', line: { color: '#ef4444', width: 2 }, marker: { size: 5 }, connectgaps: false },
+    { x: dates, y: precMed.map(v => v != null ? v * 100 : null), name: 'Medium Risk Precision', type: 'scatter', mode: 'lines+markers', line: { color: '#f59e0b', width: 2 }, marker: { size: 5 }, connectgaps: false }
+  ], plotlyLayout({ height: 280, legend: { orientation: 'h', y: -0.15 }, yaxis: { title: 'Precision %', range: [0, 105] } }),
+  { responsive: true, displayModeBar: false });
+}
+
+// ─── Billing ───
+async function loadBilling() {
+  const [summary, clusters, names, ips] = await Promise.all([
+    api('/api/billing/summary'),
+    api('/api/billing'),
+    api('/api/billing/names'),
+    api('/api/billing/ips')
+  ]);
+
+  // Summary cards
+  const mWrap = document.getElementById('billingMetrics');
+  if (summary) {
+    mWrap.innerHTML = [
+      { v: fmt(summary.shared_billing_clusters), l: 'Shared Billing Clusters' },
+      { v: fmt(summary.accounts_in_clusters), l: 'Accounts in Clusters' },
+      { v: fmtCur(summary.total_payout_at_risk), l: 'Payout at Risk' },
+      { v: fmt(summary.multi_card_ips), l: 'Multi-Card IPs' },
+      { v: fmt(summary.name_clusters), l: 'Name Clusters' }
+    ].map(c => `<div class="metric-card"><div class="metric-label">${c.l}</div><div class="metric-value">${c.v}</div></div>`).join('');
+  }
+
+  // Clusters table
+  document.getElementById('billingClustersWrap').innerHTML = buildTable('bcl', [
+    { key: 'processor_subscriber_id', label: 'Billing ID', render: v => truncate(v, 22) },
+    { key: 'proc_name', label: 'Processor', muted: true },
+    { key: 'account_count', label: 'Accounts', numeric: true, right: true },
+    { key: 'total_payout', label: 'Total Payout', numeric: true, right: true, render: v => fmtCur(v) },
+    { key: 'names', label: 'Names', muted: true, render: v => truncate(v, 30) }
+  ], clusters || [], { emptyIcon: '⊡', emptyTitle: 'No shared billing clusters', emptyDesc: 'No accounts share billing IDs.' });
+
+  // Names table
+  document.getElementById('billingNamesWrap').innerHTML = buildTable('bnm', [
+    { key: 'full_name', label: 'Name', render: v => v ? v.replace(/\b\w/g, c => c.toUpperCase()) : '—' },
+    { key: 'account_count', label: 'Accounts', numeric: true, right: true },
+    { key: 'unique_cards', label: 'Unique Cards', numeric: true, right: true },
+    { key: 'total_payout', label: 'Total Payout', numeric: true, right: true, render: v => fmtCur(v) },
+    { key: 'emails', label: 'Emails', muted: true, render: v => truncate(v, 36) }
+  ], names || [], { emptyIcon: '⊡', emptyTitle: 'No name clusters', emptyDesc: 'No names appear across multiple accounts.' });
+
+  // IPs table
+  document.getElementById('billingIpsWrap').innerHTML = buildTable('bip', [
+    { key: 'ip', label: 'IP Address' },
+    { key: 'unique_cards', label: 'Unique Cards', numeric: true, right: true },
+    { key: 'total_transactions', label: 'Transactions', numeric: true, right: true },
+    { key: 'total_payout', label: 'Total Payout', numeric: true, right: true, render: v => fmtCur(v) },
+    { key: 'emails', label: 'Emails', muted: true, render: v => truncate(v, 36) }
+  ], ips || [], { emptyIcon: '⊡', emptyTitle: 'No IP cross-references', emptyDesc: 'No IPs used with multiple billing methods.' });
+}
+
+// ═══════════════════════════════════════════════════════════
+// ACTIONS TAB
+// ═══════════════════════════════════════════════════════════
+
+let activityLog = [];
+
+function toggleCustomDates() {
+  const range = document.getElementById('fetchDateRange').value;
+  document.getElementById('customDates').style.display = range === 'custom' ? 'block' : 'none';
+}
+
+async function startFetch() {
+  const btn = document.getElementById('btnFetch');
+  const statusEl = document.getElementById('fetchStatus');
+  
+  if (btn.classList.contains('loading')) return;
+  
+  const dataType = document.getElementById('fetchDataType').value;
+  const dateRange = document.getElementById('fetchDateRange').value;
+  
+  let payload = { data_type: dataType };
+  
+  if (dateRange === 'custom') {
+    payload.start_date = document.getElementById('fetchStartDate').value;
+    payload.end_date = document.getElementById('fetchEndDate').value;
+    if (!payload.start_date || !payload.end_date) {
+      showToast('Please select start and end dates', 'error');
+      return;
+    }
+  } else {
+    payload.days = parseInt(dateRange);
+  }
+  
+  btn.classList.add('loading');
+  document.getElementById('fetchBtnText').textContent = 'Fetching...';
+  statusEl.className = 'action-status running';
+  statusEl.textContent = 'Fetching data from API...';
+  
+  try {
+    const r = await fetch('/api/fetch-data', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    const data = await r.json();
+    
+    if (r.ok) {
+      pollFetchStatus();
+    } else {
+      btn.classList.remove('loading');
+      document.getElementById('fetchBtnText').textContent = 'Start Fetch';
+      statusEl.className = 'action-status error';
+      statusEl.textContent = data.error || 'Failed to start fetch';
+    }
+  } catch (e) {
+    btn.classList.remove('loading');
+    document.getElementById('fetchBtnText').textContent = 'Start Fetch';
+    statusEl.className = 'action-status error';
+    statusEl.textContent = 'Network error: ' + e.message;
+  }
+}
+
+async function pollFetchStatus() {
+  const btn = document.getElementById('btnFetch');
+  const statusEl = document.getElementById('fetchStatus');
+  const progressContainer = document.getElementById('fetchProgress');
+  const progressFill = document.getElementById('fetchProgressFill');
+  const progressText = document.getElementById('fetchProgressText');
+  const progressPct = document.getElementById('fetchProgressPct');
+  
+  try {
+    const r = await fetch('/api/fetch-status');
+    const status = await r.json();
+    
+    if (status.status === 'running') {
+      const progress = status.progress || 0;
+      const currentType = status.current_type || 'data';
+      
+      progressContainer.classList.add('visible');
+      progressFill.style.width = progress + '%';
+      progressText.textContent = `Fetching ${currentType}...`;
+      progressPct.textContent = progress + '%';
+      statusEl.textContent = 'Fetching data... This may take a minute.';
+      
+      setTimeout(pollFetchStatus, 1500);
+    } else if (status.status === 'completed') {
+      btn.classList.remove('loading');
+      document.getElementById('fetchBtnText').textContent = 'Start Fetch';
+      statusEl.className = 'action-status success';
+      progressContainer.classList.remove('visible');
+      
+      const results = status.results || {};
+      let msg = 'Fetch complete! ';
+      for (const [type, data] of Object.entries(results)) {
+        msg += `${type}: ${data.inserted} new, ${data.duplicates} duplicates. `;
+      }
+      statusEl.textContent = msg;
+      
+      addActivity('fetch', msg);
+      showToast('Data fetch completed!');
+      
+      // Clear status after delay
+      fetch('/api/clear-task-status', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ task: 'fetch' })
+      });
+      
+      // Refresh overview if visible
+      if (currentTab === 'overview') loadTabData('overview');
+      
+    } else if (status.status === 'error') {
+      btn.classList.remove('loading');
+      document.getElementById('fetchBtnText').textContent = 'Start Fetch';
+      statusEl.className = 'action-status error';
+      statusEl.textContent = 'Error: ' + (status.error || 'Unknown error');
+      progressContainer.classList.remove('visible');
+      showToast('Fetch failed: ' + status.error, 'error');
+    }
+  } catch (e) {
+    btn.classList.remove('loading');
+    document.getElementById('fetchBtnText').textContent = 'Start Fetch';
+    progressContainer.classList.remove('visible');
+  }
+}
+
+async function startAnalysis() {
+  const btn = document.getElementById('btnAnalysis');
+  const statusEl = document.getElementById('analysisStatus');
+  
+  if (btn.classList.contains('loading')) return;
+  
+  const scope = document.getElementById('analysisScope').value;
+  
+  btn.classList.add('loading');
+  document.getElementById('analysisBtnText').textContent = 'Analyzing...';
+  statusEl.className = 'action-status running';
+  statusEl.textContent = 'Running fraud detection analysis...';
+  
+  try {
+    const r = await fetch('/api/run-analysis', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ analyze_all: scope === 'all' })
+    });
+    const data = await r.json();
+    
+    if (r.ok) {
+      pollAnalysisStatus();
+    } else {
+      btn.classList.remove('loading');
+      document.getElementById('analysisBtnText').textContent = 'Start Analysis';
+      statusEl.className = 'action-status error';
+      statusEl.textContent = data.error || 'Failed to start analysis';
+    }
+  } catch (e) {
+    btn.classList.remove('loading');
+    document.getElementById('analysisBtnText').textContent = 'Start Analysis';
+    statusEl.className = 'action-status error';
+    statusEl.textContent = 'Network error: ' + e.message;
+  }
+}
+
+async function pollAnalysisStatus() {
+  const btn = document.getElementById('btnAnalysis');
+  const statusEl = document.getElementById('analysisStatus');
+  const progressContainer = document.getElementById('analysisProgress');
+  const progressFill = document.getElementById('analysisProgressFill');
+  const progressText = document.getElementById('analysisProgressText');
+  const progressPct = document.getElementById('analysisProgressPct');
+  
+  try {
+    const r = await fetch('/api/analysis-status');
+    const status = await r.json();
+    
+    if (status.status === 'running') {
+      const progress = status.progress || 0;
+      const currentType = status.current_type || 'records';
+      const processed = status.records_processed || 0;
+      
+      progressContainer.classList.add('visible');
+      progressFill.style.width = progress + '%';
+      progressText.textContent = `Analyzing ${currentType}... ${processed > 0 ? fmt(processed) + ' records' : ''}`;
+      progressPct.textContent = progress + '%';
+      statusEl.textContent = 'Analyzing records... This may take a moment.';
+      
+      setTimeout(pollAnalysisStatus, 1500);
+    } else if (status.status === 'completed') {
+      btn.classList.remove('loading');
+      document.getElementById('analysisBtnText').textContent = 'Start Analysis';
+      statusEl.className = 'action-status success';
+      progressContainer.classList.remove('visible');
+      
+      const results = status.results || {};
+      const msg = `Analysis complete! Free: ${results.free || 0}, Paid: ${results.paid || 0}, High Risk: ${results.high_risk || 0}`;
+      statusEl.textContent = msg;
+      
+      addActivity('analysis', msg);
+      showToast('Fraud analysis completed!');
+      
+      // Clear status
+      fetch('/api/clear-task-status', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ task: 'analysis' })
+      });
+      
+      // Refresh overview
+      if (currentTab === 'overview') loadTabData('overview');
+      
+    } else if (status.status === 'error') {
+      btn.classList.remove('loading');
+      document.getElementById('analysisBtnText').textContent = 'Start Analysis';
+      statusEl.className = 'action-status error';
+      statusEl.textContent = 'Error: ' + (status.error || 'Unknown error');
+      progressContainer.classList.remove('visible');
+      showToast('Analysis failed: ' + status.error, 'error');
+    }
+  } catch (e) {
+    btn.classList.remove('loading');
+    document.getElementById('analysisBtnText').textContent = 'Start Analysis';
+    progressContainer.classList.remove('visible');
+  }
+}
+
+function addActivity(type, message) {
+  const time = new Date().toLocaleTimeString();
+  const timestamp = new Date().toISOString();
+  activityLog.unshift({ type, message, time, timestamp });
+  if (activityLog.length > 50) activityLog.pop();
+  
+  // Persist to localStorage
+  try {
+    localStorage.setItem('fd-activity-log', JSON.stringify(activityLog));
+  } catch (e) {
+    console.warn('Could not save activity log:', e);
+  }
+  
+  renderActivity();
+}
+
+function loadActivityLog() {
+  try {
+    const saved = localStorage.getItem('fd-activity-log');
+    if (saved) {
+      activityLog = JSON.parse(saved);
+      // Filter out entries older than 7 days
+      const weekAgo = Date.now() - (7 * 24 * 60 * 60 * 1000);
+      activityLog = activityLog.filter(a => {
+        if (!a.timestamp) return false;
+        return new Date(a.timestamp).getTime() > weekAgo;
+      });
+      renderActivity();
+    }
+  } catch (e) {
+    console.warn('Could not load activity log:', e);
+    activityLog = [];
+  }
+}
+
+function clearActivityLog() {
+  activityLog = [];
+  localStorage.removeItem('fd-activity-log');
+  renderActivity();
+  showToast('Activity log cleared');
+}
+
+function renderActivity() {
+  const el = document.getElementById('recentActivity');
+  if (!el) return;
+  
+  if (activityLog.length === 0) {
+    el.innerHTML = '<div class="activity-empty">No recent actions</div>';
+    return;
+  }
+  el.innerHTML = activityLog.map(a => `
+    <div class="activity-item">
+      <span class="activity-time">${a.time}</span>
+      <span class="activity-type ${a.type}">${a.type.toUpperCase()}</span>
+      ${a.message}
+    </div>
+  `).join('') + `
+    <div style="text-align:center;padding:8px;">
+      <button class="btn btn-sm btn-cancel" onclick="clearActivityLog()">Clear Log</button>
+    </div>
+  `;
+}
+
+// ═══ INIT ═══
+initTheme();
+loadActivityLog();
+loadTabData('overview');
+
+// Close shortcuts panel on outside click
+document.addEventListener('click', e => {
+  const panel = document.getElementById('shortcutsPanel');
+  const toggle = e.target.closest('.shortcuts-toggle');
+  if (!toggle && panel.classList.contains('open') && !panel.contains(e.target)) {
+    panel.classList.remove('open');
+  }
+});
+</script>
+</body>
+</html>

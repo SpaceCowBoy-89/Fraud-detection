@@ -63,6 +63,7 @@ MENU_GROUPS = {
             {'key': '17', 'label': 'Settings', 'method': 'configure_settings', 'shortcut': 's', 'help': 'Configure detection settings'},
             {'key': '18', 'label': 'View Logs', 'method': 'view_logs', 'shortcut': 'l', 'help': 'View recent log entries'},
             {'key': '19', 'label': 'Export Reports', 'method': 'export_reports', 'shortcut': None, 'help': 'Export data to CSV'},
+            {'key': '20', 'label': 'Web Dashboard', 'method': 'launch_web_dashboard', 'shortcut': 'W', 'help': 'Open web dashboard in browser'},
         ]
     }
 }

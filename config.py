@@ -55,6 +55,7 @@ DEFAULT_CONFIG = {
     'ip_velocity_threshold': 10,
     'repeated_word_threshold': 3,
     'whitelisted_affiliates': [],
+    'house_affiliates': [],  # Internal/house affiliates to exclude from fraud analysis
     'high_risk_countries': [],
     'suspicious_names': ['fatima', 'muhammed'],
     'database_path': 'affiliate_data.db'
@@ -167,6 +168,35 @@ class Config:
         """Check if affiliate is whitelisted"""
         whitelist = self.get('whitelisted_affiliates', [])
         return affiliate_id in whitelist
+
+    def add_house_affiliate(self, affiliate_id):
+        """Add affiliate to house/internal list"""
+        house = self.get('house_affiliates', [])
+        if affiliate_id not in house:
+            house.append(affiliate_id)
+            return self.set('house_affiliates', house)
+        return True
+
+    def remove_house_affiliate(self, affiliate_id):
+        """Remove affiliate from house/internal list"""
+        house = self.get('house_affiliates', [])
+        if affiliate_id in house:
+            house.remove(affiliate_id)
+            return self.set('house_affiliates', house)
+        return True
+
+    def is_house_affiliate(self, affiliate_id):
+        """Check if affiliate is a house/internal affiliate"""
+        if not affiliate_id:
+            return False
+        house = self.get('house_affiliates', [])
+        # Case-insensitive comparison
+        affiliate_lower = affiliate_id.lower() if isinstance(affiliate_id, str) else str(affiliate_id).lower()
+        return any(h.lower() == affiliate_lower for h in house if h)
+
+    def get_house_affiliates(self):
+        """Get list of house/internal affiliates"""
+        return self.get('house_affiliates', [])
 
     def export_config(self, export_path):
         """Export configuration to another file"""

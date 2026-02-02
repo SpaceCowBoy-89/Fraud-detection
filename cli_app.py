@@ -261,17 +261,28 @@ class FraudDetectionCLI:
         self.menu.show_breadcrumb()
         CLIHelpers.show_section("🔍 RUN FRAUD DETECTION")
         
+        # Show house affiliate info
+        house_affiliates = self.config.get_house_affiliates()
+        if house_affiliates:
+            console.print(f"[dim]ℹ️  {len(house_affiliates)} house affiliates will be excluded from analysis[/dim]")
+            console.print(f"[dim]   ({', '.join(house_affiliates[:3])}{'...' if len(house_affiliates) > 3 else ''})[/dim]\n")
+        
         choice = create_submenu_prompt("Analyze:", [
             {'key': '1', 'label': 'New data only', 'help': 'Records not yet analyzed'},
             {'key': '2', 'label': 'All data', 'help': 'Re-analyze everything'},
+            {'key': '3', 'label': 'All data (include house)', 'help': 'Include house affiliates'},
         ])
         
         if choice == 'back':
             return
         
+        exclude_house = choice != '3'  # Exclude house affiliates unless explicitly including
+        
         # Import fraud detection script
         sys.path.insert(0, str(Path(__file__).parent / 'scripts'))
         from email_fraud_detector import EmailFraudDetector
+        
+        house_skipped = 0
         
         with Progress(
             SpinnerColumn(),
@@ -309,12 +320,20 @@ class FraudDetectionCLI:
                     continue
                 
                 for idx, row in df.iterrows():
+                    # Get affiliate code
+                    webmaster_code = detector.get_column(row, 'webmaster_code', None)
+                    
+                    # Skip house affiliates if excluding
+                    if exclude_house and webmaster_code and self.config.is_house_affiliate(webmaster_code):
+                        house_skipped += 1
+                        continue
+                    
                     analysis = detector.analyze_email(row[email_col])
                     analysis['DUID'] = detector.get_column(row, 'duid', 'N/A')
                     analysis['payout_amount'] = detector.get_column(row, 'payout_amount', 0)
                     analysis['data_type'] = data_type
                     # Capture affiliate info
-                    analysis['webmaster_code'] = detector.get_column(row, 'webmaster_code', None)
+                    analysis['webmaster_code'] = webmaster_code
                     analysis['campaign'] = detector.get_column(row, 'campaign', None)
                     results.append(analysis)
                 
@@ -327,6 +346,9 @@ class FraudDetectionCLI:
                     self.db.mark_as_analyzed(duids, data_type)
                 
                 CLIHelpers.show_success(f"Analyzed {len(results)} {data_type} records")
+        
+        if house_skipped > 0:
+            console.print(f"[dim]ℹ️  Skipped {house_skipped:,} records from house affiliates[/dim]")
         
         # Show summary
         stats = self.db.get_fraud_statistics()
@@ -1421,15 +1443,20 @@ class FraudDetectionCLI:
         
         # Show current settings
         api_key = self.config.get_api_key()
+        house_affiliates = self.config.get_house_affiliates()
         
         console.print("[bold]Current Settings:[/bold]\n")
         console.print(f"  API Key: {'****' + api_key[-4:] if api_key else '[red]Not configured[/red]'}")
         console.print(f"  High Risk Threshold: ≥ {self.config.get_risk_threshold('high')}")
         console.print(f"  Medium Risk Threshold: {self.config.get_risk_threshold('medium')}-{self.config.get_risk_threshold('high')-1}")
+        console.print(f"  House Affiliates: {len(house_affiliates)} configured")
+        if house_affiliates:
+            console.print(f"    [dim]{', '.join(house_affiliates[:5])}{'...' if len(house_affiliates) > 5 else ''}[/dim]")
         
         choice = create_submenu_prompt("\nOptions:", [
             {'key': '1', 'label': 'Set API Key'},
             {'key': '2', 'label': 'Change Risk Thresholds'},
+            {'key': '3', 'label': 'Manage House Affiliates'},
         ])
         
         if choice == 'back':
@@ -1448,7 +1475,124 @@ class FraudDetectionCLI:
             self.config.set('risk_thresholds.medium', medium)
             CLIHelpers.show_success("Thresholds updated")
         
+        elif choice == '3':
+            self._manage_house_affiliates()
+            return  # Already shows wait_for_input
+        
         CLIHelpers.wait_for_input()
+
+    def _manage_house_affiliates(self):
+        """Manage house/internal affiliates that are excluded from fraud analysis"""
+        while True:
+            CLIHelpers.show_header()
+            CLIHelpers.show_section("🏠 HOUSE AFFILIATES")
+            
+            house_affiliates = self.config.get_house_affiliates()
+            
+            console.print("[bold]House affiliates are excluded from fraud analysis.[/bold]\n")
+            
+            if house_affiliates:
+                console.print("[bold]Current House Affiliates:[/bold]")
+                for i, aff in enumerate(house_affiliates, 1):
+                    console.print(f"  {i}. {aff}")
+                console.print()
+            else:
+                console.print("[dim]No house affiliates configured.[/dim]\n")
+            
+            choice = create_submenu_prompt("Options:", [
+                {'key': '1', 'label': 'Add House Affiliate'},
+                {'key': '2', 'label': 'Remove House Affiliate'},
+                {'key': '3', 'label': 'Import from File (CSV/TXT)'},
+                {'key': '4', 'label': 'Paste List (comma/newline separated)'},
+                {'key': '5', 'label': 'Clear All House Affiliates'},
+            ])
+            
+            if choice == 'back':
+                return
+            
+            if choice == '1':
+                affiliate = CLIHelpers.prompt("Enter affiliate code to add")
+                if affiliate:
+                    self.config.add_house_affiliate(affiliate.strip())
+                    CLIHelpers.show_success(f"Added '{affiliate}' to house affiliates")
+            
+            elif choice == '2':
+                if not house_affiliates:
+                    CLIHelpers.show_error("No house affiliates to remove")
+                else:
+                    affiliate = CLIHelpers.prompt("Enter affiliate code to remove")
+                    if affiliate and self.config.is_house_affiliate(affiliate):
+                        self.config.remove_house_affiliate(affiliate.strip())
+                        CLIHelpers.show_success(f"Removed '{affiliate}' from house affiliates")
+                    else:
+                        CLIHelpers.show_error(f"'{affiliate}' not found in house affiliates")
+            
+            elif choice == '3':
+                # Import from file
+                console.print("\n[bold]Import from File[/bold]")
+                console.print("[dim]Supported formats: CSV, TXT (one per line or comma-separated)[/dim]\n")
+                file_path = CLIHelpers.prompt("Enter file path")
+                if file_path:
+                    file_path = file_path.strip().strip('"\'')  # Remove quotes
+                    if os.path.exists(file_path):
+                        try:
+                            with open(file_path, 'r') as f:
+                                content = f.read()
+                            # Parse: handle both comma-separated and newline-separated
+                            affiliates = []
+                            for line in content.replace(',', '\n').split('\n'):
+                                aff = line.strip()
+                                if aff and not aff.startswith('#'):  # Skip comments
+                                    affiliates.append(aff)
+                            
+                            added = 0
+                            for aff in affiliates:
+                                if not self.config.is_house_affiliate(aff):
+                                    self.config.add_house_affiliate(aff)
+                                    added += 1
+                            CLIHelpers.show_success(f"Imported {added} new house affiliates from file ({len(affiliates)} total in file)")
+                        except Exception as e:
+                            CLIHelpers.show_error(f"Error reading file: {e}")
+                    else:
+                        CLIHelpers.show_error(f"File not found: {file_path}")
+            
+            elif choice == '4':
+                # Paste list
+                console.print("\n[bold]Paste Affiliate List[/bold]")
+                console.print("[dim]Paste your list below (comma or newline separated).[/dim]")
+                console.print("[dim]When done, enter an empty line or type 'done'.[/dim]\n")
+                
+                lines = []
+                while True:
+                    line = CLIHelpers.prompt("", default="")
+                    if not line or line.lower() == 'done':
+                        break
+                    lines.append(line)
+                
+                if lines:
+                    content = '\n'.join(lines)
+                    affiliates = []
+                    for line in content.replace(',', '\n').split('\n'):
+                        aff = line.strip()
+                        if aff and aff.lower() != 'done':
+                            affiliates.append(aff)
+                    
+                    added = 0
+                    for aff in affiliates:
+                        if not self.config.is_house_affiliate(aff):
+                            self.config.add_house_affiliate(aff)
+                            added += 1
+                    CLIHelpers.show_success(f"Added {added} new house affiliates ({len(affiliates)} in paste)")
+                else:
+                    CLIHelpers.show_info("No affiliates to add")
+            
+            elif choice == '5':
+                confirm = CLIHelpers.prompt("Are you sure? Type 'yes' to confirm")
+                if confirm and confirm.lower() == 'yes':
+                    self.config.set('house_affiliates', [])
+                    CLIHelpers.show_success("Cleared all house affiliates")
+            
+            CLIHelpers.wait_for_input()
     
     def launch_web_dashboard(self):
         """Launch web dashboard in browser"""

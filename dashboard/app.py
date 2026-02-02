@@ -112,6 +112,45 @@ def create_app(db, config, api_client=None):
             'db_connected': db is not None
         })
 
+    @app.route('/api/house-affiliates')
+    def api_house_affiliates():
+        """Get list of house affiliates"""
+        try:
+            house = config.get_house_affiliates()
+            return jsonify({'house_affiliates': house})
+        except Exception as e:
+            logger.error(f"Error in /api/house-affiliates: {e}")
+            return jsonify({'error': str(e)}), 500
+
+    @app.route('/api/house-affiliates', methods=['POST'])
+    def api_update_house_affiliates():
+        """Update house affiliates list"""
+        try:
+            data = request.get_json() or {}
+            action = data.get('action')
+            affiliate = sanitize_string(data.get('affiliate', ''), 100)
+            
+            if action == 'add' and affiliate:
+                config.add_house_affiliate(affiliate)
+                logger.info(f"Added house affiliate: {affiliate}")
+                return jsonify({'status': 'ok', 'message': f'Added {affiliate}'})
+            elif action == 'remove' and affiliate:
+                config.remove_house_affiliate(affiliate)
+                logger.info(f"Removed house affiliate: {affiliate}")
+                return jsonify({'status': 'ok', 'message': f'Removed {affiliate}'})
+            elif action == 'set':
+                affiliates = data.get('affiliates', [])
+                if isinstance(affiliates, list):
+                    config.set('house_affiliates', [sanitize_string(a, 100) for a in affiliates if a])
+                    return jsonify({'status': 'ok', 'message': f'Set {len(affiliates)} house affiliates'})
+            else:
+                return jsonify({'error': 'Invalid action. Use add, remove, or set'}), 400
+            
+            return jsonify({'error': 'Missing required parameters'}), 400
+        except Exception as e:
+            logger.error(f"Error updating house affiliates: {e}")
+            return jsonify({'error': str(e)}), 500
+
     @app.route('/api/stats')
     def api_stats():
         try:
@@ -272,6 +311,7 @@ def create_app(db, config, api_client=None):
         try:
             data = request.get_json() or {}
             analyze_all = bool(data.get('analyze_all', False))
+            include_house = bool(data.get('include_house', False))  # Include house affiliates?
             
             # Run in background thread
             def run_analysis():
@@ -287,7 +327,11 @@ def create_app(db, config, api_client=None):
                     sys.path.insert(0, str(Path(__file__).parent.parent / 'scripts'))
                     from email_fraud_detector import EmailFraudDetector
                     
-                    results_summary = {'free': 0, 'paid': 0, 'high_risk': 0}
+                    results_summary = {'free': 0, 'paid': 0, 'high_risk': 0, 'house_skipped': 0}
+                    
+                    # Get house affiliates for filtering
+                    house_affiliates = config.get_house_affiliates() if not include_house else []
+                    house_affiliates_lower = set(h.lower() for h in house_affiliates if h)
                     
                     # Use validated data types only
                     valid_types = ['free', 'paid']
@@ -319,20 +363,32 @@ def create_app(db, config, api_client=None):
                         # Analyze
                         results = []
                         email_col = detector.column_map.get('email')
+                        processed = 0
                         
                         for idx, row in df.iterrows():
+                            processed += 1
+                            
+                            # Get affiliate code
+                            webmaster_code = detector.get_column(row, 'webmaster_code', None)
+                            
+                            # Skip house affiliates if not including
+                            if house_affiliates_lower and webmaster_code:
+                                if webmaster_code.lower() in house_affiliates_lower:
+                                    results_summary['house_skipped'] += 1
+                                    continue
+                            
                             analysis = detector.analyze_email(row[email_col] if email_col else None)
                             analysis['DUID'] = detector.get_column(row, 'duid', 'N/A')
                             analysis['payout_amount'] = detector.get_column(row, 'payout_amount', 0)
                             analysis['data_type'] = data_type
-                            analysis['webmaster_code'] = detector.get_column(row, 'webmaster_code', None)
+                            analysis['webmaster_code'] = webmaster_code
                             analysis['campaign'] = detector.get_column(row, 'campaign', None)
                             results.append(analysis)
                             
                             # Update progress every 100 records
-                            if len(results) % 100 == 0:
+                            if processed % 100 == 0:
                                 base_progress = 50 if type_idx == 1 else 0
-                                record_progress = int((len(results) / total_records) * 50)
+                                record_progress = int((processed / total_records) * 50)
                                 _running_tasks['analysis']['progress'] = base_progress + record_progress
                                 _running_tasks['analysis']['records_processed'] = len(results)
                         

@@ -914,6 +914,51 @@ body {
 .error-state p { font-size: 12px; font-family: var(--mono); color: var(--text-muted); }
 .error-state .btn { margin-top: 16px; }
 
+/* ═══ HOUSE AFFILIATES LIST ═══ */
+.house-affiliates-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+  min-height: 40px;
+}
+.house-affiliate-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+.house-affiliate-tag .remove-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--border);
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 10px;
+  border: none;
+  transition: all 0.15s;
+}
+.house-affiliate-tag .remove-btn:hover {
+  background: var(--risk-high);
+  color: #fff;
+}
+.house-affiliates-empty {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text-muted);
+  padding: 12px;
+}
+
 /* ═══ RESPONSIVE ═══ */
 @media (max-width: 768px) {
   .sidebar { width: 56px; min-width: 56px; }
@@ -1066,6 +1111,11 @@ body {
                 <option value="">All Risk Levels</option>
                 <option value="high">Has High Risk</option>
                 <option value="clean">No High Risk</option>
+              </select>
+              <select class="filter-select" id="filterAffHouse" onchange="filterTable('aff')">
+                <option value="external">External Only</option>
+                <option value="all">All Affiliates</option>
+                <option value="house">House Only</option>
               </select>
               <span class="search-count" id="affSearchCount"></span>
             </div>
@@ -1243,6 +1293,14 @@ body {
                   <option value="all">Re-analyze all data</option>
                 </select>
               </div>
+              <div class="form-group">
+                <label class="form-label">House Affiliates</label>
+                <select id="analysisHouseFilter" class="form-select">
+                  <option value="exclude">Exclude house affiliates</option>
+                  <option value="include">Include house affiliates</option>
+                </select>
+                <p class="form-hint" id="houseAffiliateHint">Loading...</p>
+              </div>
               <p class="form-hint">Analysis detects fraud patterns in email addresses, POV timing, device types, and more.</p>
               <button class="btn btn-primary btn-full" id="btnAnalysis" onclick="startAnalysis()">
                 <span id="analysisBtnText">Start Analysis</span>
@@ -1258,6 +1316,43 @@ body {
                 </div>
               </div>
             </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- House Affiliates Management -->
+      <div class="panel">
+        <div class="panel-header">
+          <span class="panel-title">🏠 House Affiliates</span>
+          <div style="display:flex;align-items:center;gap:12px;">
+            <span class="panel-subtitle">Internal affiliates excluded from fraud analysis</span>
+            <button class="btn btn-sm btn-export" onclick="exportHouseAffiliates()">
+              <span class="btn-icon">↓</span> Export
+            </button>
+          </div>
+        </div>
+        <div class="panel-body">
+          <div class="action-form">
+            <div class="form-row">
+              <div class="form-group" style="flex:2">
+                <label class="form-label">Add Single Affiliate</label>
+                <input type="text" class="form-input" id="houseAffiliateInput" placeholder="Enter affiliate code...">
+              </div>
+              <div class="form-group" style="flex:1;display:flex;align-items:flex-end;">
+                <button class="btn btn-primary" onclick="addHouseAffiliate()">Add</button>
+              </div>
+            </div>
+            
+            <div class="form-group">
+              <label class="form-label">Bulk Import (paste list - comma or newline separated)</label>
+              <textarea class="form-input" id="bulkHouseInput" rows="4" placeholder="affiliate1, affiliate2, affiliate3&#10;or one per line..."></textarea>
+            </div>
+            <div class="form-row">
+              <button class="btn btn-primary" onclick="bulkAddHouseAffiliates()">Import List</button>
+              <button class="btn btn-cancel" onclick="clearAllHouseAffiliates()">Clear All</button>
+            </div>
+            
+            <div id="houseAffiliatesList" class="house-affiliates-list"></div>
           </div>
         </div>
       </div>
@@ -1554,7 +1649,18 @@ function filterTable(tableId, searchText) {
     };
   } else if (tableId === 'aff') {
     const riskFilter = document.getElementById('filterAffRisk')?.value;
+    const houseFilter = document.getElementById('filterAffHouse')?.value || 'external';
+    const houseLower = new Set(houseAffiliates.map(h => h.toLowerCase()));
+    
     filterFn = row => {
+      const code = (row.webmaster_code || '').toLowerCase();
+      const isHouse = houseLower.has(code);
+      
+      // House filter
+      if (houseFilter === 'external' && isHouse) return false;
+      if (houseFilter === 'house' && !isHouse) return false;
+      
+      // Risk filter
       if (riskFilter === 'high' && (row.high_risk_count || 0) === 0) return false;
       if (riskFilter === 'clean' && (row.high_risk_count || 0) > 0) return false;
       return true;
@@ -1930,15 +2036,27 @@ async function loadAffiliates() {
     return;
   }
   
-  affiliatesData = res.data || [];
-  rawDataCache.aff = [...affiliatesData];  // Cache for filtering
-  document.getElementById('affCount').textContent = affiliatesData.length + ' affiliates';
+  const allAffiliates = res.data || [];
+  rawDataCache.aff = [...allAffiliates];  // Cache for filtering
   
   // Clear search when reloading
   const searchInput = document.getElementById('searchAffiliates');
   if (searchInput) searchInput.value = '';
   const filterSelect = document.getElementById('filterAffRisk');
   if (filterSelect) filterSelect.value = '';
+  // Default to external affiliates only
+  const houseSelect = document.getElementById('filterAffHouse');
+  if (houseSelect) houseSelect.value = 'external';
+  
+  // Filter out house affiliates by default
+  const houseLower = new Set(houseAffiliates.map(h => h.toLowerCase()));
+  affiliatesData = allAffiliates.filter(row => {
+    const code = (row.webmaster_code || '').toLowerCase();
+    return !houseLower.has(code);
+  });
+  
+  const houseCount = allAffiliates.length - affiliatesData.length;
+  document.getElementById('affCount').textContent = `${affiliatesData.length} affiliates` + (houseCount > 0 ? ` (${houseCount} house hidden)` : '');
 
   wrap.innerHTML = buildTable('aff', [
     { key: 'webmaster_code', label: 'Affiliate' },
@@ -2155,6 +2273,215 @@ function toggleCustomDates() {
   document.getElementById('customDates').style.display = range === 'custom' ? 'block' : 'none';
 }
 
+// ═══ HOUSE AFFILIATES ═══
+let houseAffiliates = [];
+
+async function loadHouseAffiliates() {
+  try {
+    const r = await fetch('/api/house-affiliates');
+    const data = await r.json();
+    houseAffiliates = data.house_affiliates || [];
+    renderHouseAffiliates();
+    updateHouseAffiliateHint();
+  } catch (e) {
+    console.error('Failed to load house affiliates:', e);
+  }
+}
+
+function renderHouseAffiliates() {
+  const el = document.getElementById('houseAffiliatesList');
+  if (!el) return;
+  
+  if (houseAffiliates.length === 0) {
+    el.innerHTML = '<div class="house-affiliates-empty">No house affiliates configured</div>';
+    return;
+  }
+  
+  el.innerHTML = houseAffiliates.map(aff => `
+    <div class="house-affiliate-tag">
+      <span>${aff}</span>
+      <button class="remove-btn" onclick="removeHouseAffiliate('${aff}')" title="Remove">×</button>
+    </div>
+  `).join('');
+}
+
+function updateHouseAffiliateHint() {
+  const hint = document.getElementById('houseAffiliateHint');
+  if (hint) {
+    if (houseAffiliates.length === 0) {
+      hint.textContent = 'No house affiliates configured';
+    } else {
+      hint.textContent = `${houseAffiliates.length} house affiliate${houseAffiliates.length > 1 ? 's' : ''} will be excluded`;
+    }
+  }
+}
+
+async function addHouseAffiliate() {
+  const input = document.getElementById('houseAffiliateInput');
+  const affiliate = input.value.trim();
+  
+  if (!affiliate) {
+    showToast('Please enter an affiliate code', 'error');
+    return;
+  }
+  
+  if (houseAffiliates.includes(affiliate)) {
+    showToast('Affiliate already in house list', 'error');
+    return;
+  }
+  
+  try {
+    const r = await fetch('/api/house-affiliates', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'add', affiliate })
+    });
+    const data = await r.json();
+    
+    if (r.ok) {
+      houseAffiliates.push(affiliate);
+      renderHouseAffiliates();
+      updateHouseAffiliateHint();
+      input.value = '';
+      showToast(`Added '${affiliate}' to house affiliates`);
+    } else {
+      showToast(data.error || 'Failed to add affiliate', 'error');
+    }
+  } catch (e) {
+    showToast('Network error: ' + e.message, 'error');
+  }
+}
+
+async function removeHouseAffiliate(affiliate) {
+  try {
+    const r = await fetch('/api/house-affiliates', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'remove', affiliate })
+    });
+    const data = await r.json();
+    
+    if (r.ok) {
+      houseAffiliates = houseAffiliates.filter(a => a !== affiliate);
+      renderHouseAffiliates();
+      updateHouseAffiliateHint();
+      showToast(`Removed '${affiliate}' from house affiliates`);
+    } else {
+      showToast(data.error || 'Failed to remove affiliate', 'error');
+    }
+  } catch (e) {
+    showToast('Network error: ' + e.message, 'error');
+  }
+}
+
+async function bulkAddHouseAffiliates() {
+  const textarea = document.getElementById('bulkHouseInput');
+  const content = textarea.value.trim();
+  
+  if (!content) {
+    showToast('Please paste a list of affiliates', 'error');
+    return;
+  }
+  
+  // Parse: handle both comma and newline separated
+  const affiliates = content
+    .replace(/,/g, '\n')
+    .split('\n')
+    .map(a => a.trim())
+    .filter(a => a && a.length > 0);
+  
+  if (affiliates.length === 0) {
+    showToast('No valid affiliates found in list', 'error');
+    return;
+  }
+  
+  // Filter out duplicates
+  const newAffiliates = affiliates.filter(a => !houseAffiliates.includes(a));
+  
+  if (newAffiliates.length === 0) {
+    showToast('All affiliates already in house list', 'error');
+    return;
+  }
+  
+  try {
+    const r = await fetch('/api/house-affiliates', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'set', affiliates: [...houseAffiliates, ...newAffiliates] })
+    });
+    const data = await r.json();
+    
+    if (r.ok) {
+      houseAffiliates = [...houseAffiliates, ...newAffiliates];
+      renderHouseAffiliates();
+      updateHouseAffiliateHint();
+      textarea.value = '';
+      showToast(`Added ${newAffiliates.length} house affiliates (${affiliates.length - newAffiliates.length} duplicates skipped)`);
+    } else {
+      showToast(data.error || 'Failed to import affiliates', 'error');
+    }
+  } catch (e) {
+    showToast('Network error: ' + e.message, 'error');
+  }
+}
+
+async function clearAllHouseAffiliates() {
+  if (!confirm('Are you sure you want to remove ALL house affiliates?')) {
+    return;
+  }
+  
+  try {
+    const r = await fetch('/api/house-affiliates', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'set', affiliates: [] })
+    });
+    const data = await r.json();
+    
+    if (r.ok) {
+      houseAffiliates = [];
+      renderHouseAffiliates();
+      updateHouseAffiliateHint();
+      showToast('Cleared all house affiliates');
+    } else {
+      showToast(data.error || 'Failed to clear affiliates', 'error');
+    }
+  } catch (e) {
+    showToast('Network error: ' + e.message, 'error');
+  }
+}
+
+function exportHouseAffiliates() {
+  if (houseAffiliates.length === 0) {
+    showToast('No house affiliates to export', 'error');
+    return;
+  }
+  
+  const content = houseAffiliates.join('\n');
+  const blob = new Blob([content], { type: 'text/plain' });
+  const url = URL.createObjectURL(blob);
+  
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'house_affiliates.txt';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+  
+  showToast(`Exported ${houseAffiliates.length} house affiliates`);
+}
+
+// Allow Enter key to add affiliate
+document.addEventListener('DOMContentLoaded', () => {
+  const input = document.getElementById('houseAffiliateInput');
+  if (input) {
+    input.addEventListener('keypress', e => {
+      if (e.key === 'Enter') addHouseAffiliate();
+    });
+  }
+});
+
 async function startFetch() {
   const btn = document.getElementById('btnFetch');
   const statusEl = document.getElementById('fetchStatus');
@@ -2277,6 +2604,7 @@ async function startAnalysis() {
   if (btn.classList.contains('loading')) return;
   
   const scope = document.getElementById('analysisScope').value;
+  const houseFilter = document.getElementById('analysisHouseFilter').value;
   
   btn.classList.add('loading');
   document.getElementById('analysisBtnText').textContent = 'Analyzing...';
@@ -2287,7 +2615,10 @@ async function startAnalysis() {
     const r = await fetch('/api/run-analysis', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ analyze_all: scope === 'all' })
+      body: JSON.stringify({ 
+        analyze_all: scope === 'all',
+        include_house: houseFilter === 'include'
+      })
     });
     const data = await r.json();
     
@@ -2338,7 +2669,10 @@ async function pollAnalysisStatus() {
       progressContainer.classList.remove('visible');
       
       const results = status.results || {};
-      const msg = `Analysis complete! Free: ${results.free || 0}, Paid: ${results.paid || 0}, High Risk: ${results.high_risk || 0}`;
+      let msg = `Analysis complete! Free: ${results.free || 0}, Paid: ${results.paid || 0}, High Risk: ${results.high_risk || 0}`;
+      if (results.house_skipped > 0) {
+        msg += ` (${results.house_skipped} house records skipped)`;
+      }
       statusEl.textContent = msg;
       
       addActivity('analysis', msg);
@@ -2435,6 +2769,7 @@ function renderActivity() {
 // ═══ INIT ═══
 initTheme();
 loadActivityLog();
+loadHouseAffiliates();
 loadTabData('overview');
 
 // Close shortcuts panel on outside click

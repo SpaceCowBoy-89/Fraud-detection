@@ -395,11 +395,12 @@ class EmailFraudDetector:
 
         # Split email into username and domain
         if '@' not in email:
+            # Data quality issue, not fraud - score 0 but flag for review
             return {
                 'email': email,
-                'risk_score': 100,
-                'flags': ['INVALID_EMAIL'],
-                'details': {'reason': 'No @ symbol found'}
+                'risk_score': 0,
+                'flags': ['DATA_QUALITY_MISSING_EMAIL'],
+                'details': {'reason': 'No @ symbol found - data quality issue, not fraud'}
             }
 
         username, domain = email.split('@', 1)

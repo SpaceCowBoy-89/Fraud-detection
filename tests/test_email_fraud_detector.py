@@ -32,10 +32,10 @@ class TestEmailFraudDetector:
         assert result['email'] == "john.smith@gmail.com"
     
     def test_invalid_email_no_at_symbol(self, detector):
-        """Test email without @ symbol"""
+        """Test email without @ symbol - treated as data quality, not fraud"""
         result = detector.analyze_email("invalid_email")
-        assert result['risk_score'] == 100
-        assert 'INVALID_EMAIL' in result['flags']
+        assert result['risk_score'] == 0  # Data quality issue, not fraud
+        assert 'DATA_QUALITY_MISSING_EMAIL' in result['flags']
     
     def test_empty_email(self, detector):
         """Test empty/None email"""

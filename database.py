@@ -20,8 +20,11 @@ class Database:
     
     @contextmanager
     def get_connection(self):
-        """Context manager for database connections"""
-        conn = sqlite3.connect(self.db_path)
+        """Context manager for database connections with WAL mode and timeout"""
+        conn = sqlite3.connect(self.db_path, timeout=30.0)
+        # Enable WAL mode for better concurrency
+        conn.execute('PRAGMA journal_mode=WAL')
+        conn.execute('PRAGMA busy_timeout=30000')  # 30 second timeout
         try:
             yield conn
             conn.commit()
@@ -38,7 +41,10 @@ class Database:
 
     def setup_database(self):
         """Create tables with proper schema and indexes"""
-        conn = sqlite3.connect(self.db_path)
+        conn = sqlite3.connect(self.db_path, timeout=30.0)
+        # Enable WAL mode for better concurrency
+        conn.execute('PRAGMA journal_mode=WAL')
+        conn.execute('PRAGMA busy_timeout=30000')
         c = conn.cursor()
 
         # Paid transactions (sales) table
@@ -613,6 +619,72 @@ class Database:
                          VALUES (?, ?, ?, ?)''',
                       (data_type, start_date, end_date, count))
 
+    def backfill_affiliates(self):
+        """
+        Backfill missing webmaster_code values in fraud_results from source tables.
+        Looks up the DUID in free/paid tables and copies webmaster_code.
+        
+        Returns:
+            dict with counts of updated records
+        """
+        with self.get_connection() as conn:
+            c = conn.cursor()
+            
+            # Count records needing backfill
+            c.execute("""
+                SELECT COUNT(*) FROM fraud_results 
+                WHERE webmaster_code IS NULL OR webmaster_code = ''
+            """)
+            needs_backfill = c.fetchone()[0]
+            
+            if needs_backfill == 0:
+                return {'needs_backfill': 0, 'updated_from_free': 0, 'updated_from_paid': 0}
+            
+            # Update from free table
+            c.execute("""
+                UPDATE fraud_results
+                SET webmaster_code = (
+                    SELECT f.webmaster_code FROM free f 
+                    WHERE f.duid = fraud_results.duid 
+                    AND f.webmaster_code IS NOT NULL AND f.webmaster_code != ''
+                    LIMIT 1
+                )
+                WHERE (webmaster_code IS NULL OR webmaster_code = '')
+                AND EXISTS (
+                    SELECT 1 FROM free f 
+                    WHERE f.duid = fraud_results.duid 
+                    AND f.webmaster_code IS NOT NULL AND f.webmaster_code != ''
+                )
+            """)
+            updated_from_free = c.rowcount
+            
+            # Update from paid table
+            c.execute("""
+                UPDATE fraud_results
+                SET webmaster_code = (
+                    SELECT p.webmaster_code FROM paid p 
+                    WHERE p.duid = fraud_results.duid 
+                    AND p.webmaster_code IS NOT NULL AND p.webmaster_code != ''
+                    LIMIT 1
+                )
+                WHERE (webmaster_code IS NULL OR webmaster_code = '')
+                AND EXISTS (
+                    SELECT 1 FROM paid p 
+                    WHERE p.duid = fraud_results.duid 
+                    AND p.webmaster_code IS NOT NULL AND p.webmaster_code != ''
+                )
+            """)
+            updated_from_paid = c.rowcount
+            
+            logger.info(f"Backfilled affiliates: {updated_from_free} from free, {updated_from_paid} from paid")
+            
+            return {
+                'needs_backfill': needs_backfill,
+                'updated_from_free': updated_from_free,
+                'updated_from_paid': updated_from_paid,
+                'total_updated': updated_from_free + updated_from_paid
+            }
+
     def get_fraud_results(self, data_type=None, min_risk=None, limit=None):
         """
         Get fraud results as DataFrame.
@@ -1099,71 +1171,25 @@ class Database:
 
     def get_billing_correlations(self, min_accounts=2):
         """
-        Find accounts sharing the same billing information (processor_subscriber_id).
-        This is a strong fraud indicator.
-        
-        Args:
-            min_accounts: Minimum number of accounts sharing billing info
-        
-        Returns:
-            DataFrame with billing clusters
+        DEPRECATED: processor_subscriber_id data is unreliable for fraud detection.
+        Returns empty DataFrame to maintain API compatibility.
         """
         import pandas as pd
-        
-        query = """
-            SELECT 
-                processor_subscriber_id,
-                proc_name,
-                COUNT(*) as account_count,
-                GROUP_CONCAT(duid) as duids,
-                GROUP_CONCAT(email) as emails,
-                SUM(payout_amount) as total_payout,
-                SUM(sale_amount) as total_sales,
-                AVG(chargeback_count) as avg_chargebacks,
-                GROUP_CONCAT(DISTINCT first_name || ' ' || last_name) as names
-            FROM paid
-            WHERE processor_subscriber_id IS NOT NULL 
-              AND processor_subscriber_id != ''
-            GROUP BY processor_subscriber_id
-            HAVING COUNT(*) >= ?
-            ORDER BY account_count DESC, total_payout DESC
-        """
-        
-        with self.get_connection() as conn:
-            df = pd.read_sql_query(query, conn, params=[min_accounts])
-        
-        return df
+        return pd.DataFrame(columns=['processor_subscriber_id', 'proc_name', 'account_count', 
+                                     'duids', 'emails', 'total_payout', 'total_sales', 
+                                     'avg_chargebacks', 'names'])
 
     def get_billing_cluster_details(self, processor_subscriber_id):
         """
-        Get detailed information about accounts in a billing cluster.
-        
-        Args:
-            processor_subscriber_id: The shared billing identifier
-        
-        Returns:
-            DataFrame with account details
+        DEPRECATED: processor_subscriber_id data is unreliable for fraud detection.
+        Returns empty DataFrame to maintain API compatibility.
         """
         import pandas as pd
-        
-        query = """
-            SELECT 
-                p.duid, p.email, p.first_name, p.last_name,
-                p.trans_datetime, p.sale_amount, p.payout_amount,
-                p.chargeback_count, p.chargeback_amount,
-                p.credit_count, p.credit_amount,
-                p.ip, p.geo_country, p.zip,
-                fr.risk_score, fr.flags
-            FROM paid p
-            LEFT JOIN fraud_results fr ON p.duid = fr.duid
-            WHERE p.processor_subscriber_id = ?
-            ORDER BY p.trans_datetime DESC
-        """
-        
-        with self.get_connection() as conn:
-            df = pd.read_sql_query(query, conn, params=[processor_subscriber_id])
-        
-        return df
+        return pd.DataFrame(columns=['duid', 'email', 'first_name', 'last_name',
+                                     'trans_datetime', 'sale_amount', 'payout_amount',
+                                     'chargeback_count', 'chargeback_amount',
+                                     'credit_count', 'credit_amount',
+                                     'ip', 'geo_country', 'zip', 'risk_score', 'flags'])
 
     def get_name_correlations(self, min_accounts=3):
         """
@@ -1201,46 +1227,25 @@ class Database:
 
     def get_ip_billing_correlations(self):
         """
-        Find IPs used with multiple different billing methods.
-        Strong indicator of fraud testing/rings.
-        
-        Returns:
-            DataFrame with IP + billing clusters
+        DEPRECATED: Relies on unreliable processor_subscriber_id data.
+        Returns empty DataFrame to maintain API compatibility.
         """
         import pandas as pd
-        
-        query = """
-            SELECT 
-                ip,
-                COUNT(DISTINCT processor_subscriber_id) as unique_cards,
-                COUNT(*) as total_transactions,
-                GROUP_CONCAT(DISTINCT email) as emails,
-                SUM(payout_amount) as total_payout,
-                SUM(chargeback_count) as total_chargebacks
-            FROM paid
-            WHERE ip IS NOT NULL AND ip != ''
-              AND processor_subscriber_id IS NOT NULL AND processor_subscriber_id != ''
-            GROUP BY ip
-            HAVING COUNT(DISTINCT processor_subscriber_id) >= 2
-            ORDER BY unique_cards DESC, total_payout DESC
-        """
-        
-        with self.get_connection() as conn:
-            df = pd.read_sql_query(query, conn)
-        
-        return df
+        return pd.DataFrame(columns=['ip', 'unique_cards', 'total_transactions', 
+                                     'emails', 'total_payout', 'total_chargebacks'])
 
     def get_high_risk_billing_summary(self):
         """
         Get summary of billing-related fraud indicators.
+        NOTE: Shared billing clusters by processor_subscriber_id are disabled (unreliable data).
         
         Returns:
             Dictionary with billing fraud metrics
         """
         summary = {
-            'shared_billing_clusters': 0,
-            'accounts_in_clusters': 0,
-            'total_payout_at_risk': 0,
+            'shared_billing_clusters': 0,  # Disabled - unreliable data
+            'accounts_in_clusters': 0,  # Disabled - unreliable data
+            'total_payout_at_risk': 0,  # Disabled - unreliable data
             'multi_card_ips': 0,
             'name_clusters': 0,
             'high_chargeback_accounts': 0
@@ -1249,34 +1254,11 @@ class Database:
         with self.get_connection() as conn:
             c = conn.cursor()
             
-            # Shared billing clusters (2+ accounts)
-            c.execute("""
-                SELECT COUNT(*), SUM(cnt), SUM(payout)
-                FROM (
-                    SELECT processor_subscriber_id, COUNT(*) as cnt, SUM(payout_amount) as payout
-                    FROM paid
-                    WHERE processor_subscriber_id IS NOT NULL AND processor_subscriber_id != ''
-                    GROUP BY processor_subscriber_id
-                    HAVING COUNT(*) >= 2
-                )
-            """)
-            result = c.fetchone()
-            summary['shared_billing_clusters'] = result[0] or 0
-            summary['accounts_in_clusters'] = result[1] or 0
-            summary['total_payout_at_risk'] = result[2] or 0
+            # Shared billing clusters - DISABLED (unreliable processor_subscriber_id data)
+            # Kept at 0
             
-            # IPs with multiple cards
-            c.execute("""
-                SELECT COUNT(*)
-                FROM (
-                    SELECT ip
-                    FROM paid
-                    WHERE ip IS NOT NULL AND processor_subscriber_id IS NOT NULL
-                    GROUP BY ip
-                    HAVING COUNT(DISTINCT processor_subscriber_id) >= 2
-                )
-            """)
-            summary['multi_card_ips'] = c.fetchone()[0] or 0
+            # IPs with multiple cards - DISABLED (relies on processor_subscriber_id)
+            # Kept at 0
             
             # Name clusters
             c.execute("""

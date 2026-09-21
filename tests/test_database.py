@@ -45,7 +45,7 @@ class TestDatabase:
         conn.close()
         
         required_tables = ['free', 'paid', 'fraud_results', 'fetch_history', 
-                          'fraud_outcomes', 'detection_metrics', 'low_risk_samples']
+                          'fraud_outcomes', 'affiliate_actions', 'detection_metrics', 'low_risk_samples']
         
         for table in required_tables:
             assert table in tables, f"Table {table} not found"
@@ -119,6 +119,25 @@ class TestDatabase:
         # Get medium and above
         med_plus_df = temp_db.get_fraud_results(min_risk=25)
         assert len(med_plus_df) == 2
+
+    def test_get_fraud_results_no_duplicate_rows_when_duid_in_free_and_paid(self, temp_db):
+        """Same duid in free + paid must not Cartesian-merge into multiple rows."""
+        with temp_db.get_connection() as conn:
+            conn.execute(
+                """INSERT INTO fraud_results (duid, email, risk_score, flags, details, payout_amount, data_type)
+                   VALUES ('dupuid', 'user@example.com', 80, '[]', '{}', 25, 'paid')"""
+            )
+            conn.execute(
+                """INSERT INTO free (duid, email, trans_datetime, webmaster_code)
+                   VALUES ('dupuid', 'user@example.com', '2024-01-01 10:00:00', 'aff_free')"""
+            )
+            conn.execute(
+                """INSERT INTO paid (duid, email, trans_datetime, webmaster_code, payout_amount)
+                   VALUES ('dupuid', 'user@example.com', '2024-01-02 11:00:00', 'aff_paid', 25)"""
+            )
+        df = temp_db.get_fraud_results(min_risk=50)
+        assert len(df) == 1
+        assert df.iloc[0]['duid'] == 'dupuid'
     
     # ==================== Fraud Statistics ====================
     
@@ -267,6 +286,24 @@ class TestDatabase:
         # Verify
         samples = temp_db.get_low_risk_samples(status='missed_fraud')
         assert len(samples) == 1
+
+    def test_affiliate_actions_crud(self, temp_db):
+        assert temp_db.get_affiliate_action('AFFX') is None
+        assert temp_db.upsert_affiliate_action(
+            'AFFX',
+            'actioned',
+            action_type='traffic_closed',
+            trigger_reason='high_fraud_rate',
+            notes='Closed per tool',
+            updated_by='pytest',
+        ) is True
+        row = temp_db.get_affiliate_action('AFFX')
+        assert row['webmaster_code'] == 'AFFX'
+        assert row['action_status'] == 'actioned'
+        assert row['action_type'] == 'traffic_closed'
+        assert len(temp_db.list_affiliate_actions()) == 1
+        assert temp_db.delete_affiliate_action('AFFX') == 1
+        assert temp_db.get_affiliate_action('AFFX') is None
 
 
 class TestBillingCorrelations:

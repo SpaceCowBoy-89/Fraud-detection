@@ -73,9 +73,10 @@ class APIClient:
             if filters.get('campaign'):
                 params['campaign'] = filters['campaign']
 
-        return self._make_request_with_retry(params)
+        label = 'paid' if params.get('search_paid') else 'free' if params.get('search_free') else 'export'
+        return self._make_request_with_retry(params, label=label)
 
-    def _make_request_with_retry(self, params):
+    def _make_request_with_retry(self, params, label='export'):
         """Make API request with exponential backoff retry"""
         for attempt in range(self.max_retries):
             try:
@@ -87,8 +88,14 @@ class APIClient:
                     timeout=self.timeout
                 )
 
-                # Check for HTTP errors
-                response.raise_for_status()
+                # Check for HTTP errors — log the body first so we can see what the API said
+                if not response.ok:
+                    body_preview = response.text[:500] if response.text else '(empty body)'
+                    logger.error(
+                        f"API HTTP {response.status_code} for {label} "
+                        f"[attempt {attempt + 1}]. Response body: {body_preview}"
+                    )
+                    response.raise_for_status()
 
                 # Parse JSON
                 data = response.json()
@@ -179,32 +186,28 @@ class APIClient:
 
         return []
 
+    def probe_connectivity(self, timeout=8):
+        """
+        Lightweight auth/connectivity probe (a=me).
+        Returns True when VPN/API access is ready; False on 403/timeout/etc.
+        """
+        if not self.api_key:
+            return False
+        try:
+            response = requests.get(
+                self.base_url,
+                params={'api_key': self.api_key, 'a': 'me'},
+                timeout=timeout,
+            )
+            return 200 <= response.status_code < 400
+        except RequestException:
+            return False
+
     def test_connection(self):
         """Test API connection"""
-        try:
-            # Fetch just 1 day of data as a test
-            today = datetime.now().strftime('%Y-%m-%d')
-            yesterday = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
-
-            params = {
-                'api_key': self.api_key,
-                'a': 'member.sales_data_export',
-                'v': 'json',
-                'start_date': yesterday,
-                'end_date': today,
-                'search_free': 1
-            }
-
-            response = requests.get(self.base_url, params=params, timeout=10)
-            response.raise_for_status()
-
+        ok = self.probe_connectivity(timeout=10)
+        if ok:
             logger.info("API connection test successful")
             return True, "Connection successful"
-
-        except RequestException as e:
-            logger.error(f"API connection test failed: {e}")
-            return False, f"Connection failed: {str(e)}"
-
-        except Exception as e:
-            logger.error(f"Unexpected error during connection test: {e}")
-            return False, f"Error: {str(e)}"
+        logger.error("API connection test failed (probe a=me did not succeed)")
+        return False, "Connection failed: API probe (a=me) did not return success"

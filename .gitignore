@@ -1,15 +1,22 @@
 # Data files (sensitive customer information)
 data/*.csv
+data/*.mmdb
+*.db-shm
+*.db-wal
 reports/*.csv
 reports/*.html
 reports/visualizations/
 
 # Databases and logs (sensitive / local)
 *.db
+apscheduler_jobs.sqlite
 *.log
+backups/
+models/
 
 # Config with secrets (use config.example.json as template)
 config.json
+.env
 
 # Python
 __pycache__/

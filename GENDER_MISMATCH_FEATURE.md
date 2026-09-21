@@ -69,7 +69,7 @@ When a mismatch is detected, the fraud details include:
 ### Run Analysis
 ```bash
 cd ~/fraud-detection
-python3 cli_fraud_detection.py
+python run.py
 
 # Choose: 2 (Run Fraud Detection Analysis)
 # Choose: 2 (All data - re-analyze everything)

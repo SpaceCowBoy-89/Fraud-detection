@@ -293,7 +293,7 @@ class FraudExplainer:
             'WRITTEN_NUMBER': ('Email contains written numbers', 25),
             'REPEATED_WORD': ('Email contains repeated words', 35),
             'SUSPICIOUS_NAME': ('Email contains suspicious name', 30),
-            'DOMAIN_CONCENTRATION': ('High concentration from same domain', 30),
+            'AFFILIATE_DOMAIN_CONCENTRATION': ('Affiliate has high concentration on this email domain', 20),
             'FAST_POV': ('Email verified suspiciously fast', 40),
             'GENDER_NAME_MISMATCH': ('Name/gender mismatch detected', 35),
         }

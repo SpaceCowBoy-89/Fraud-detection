@@ -5,7 +5,7 @@
 **What it does:** Allows you to analyze fraud patterns for specific time periods or analysis sessions.
 
 **How to use:**
-1. Run CLI: `python3 cli_fraud_detection.py`
+1. Start dashboard: `python run.py` (or `docker compose up -d`)
 2. Choose **Option 11** (Pattern Discovery)
 3. Select scope:
    - **[1] Specific Session** - Pick a previous analysis session
@@ -38,7 +38,7 @@
 
 **How to use:**
 ```bash
-python3 cli_fraud_detection.py
+python run.py
 # Choose: 11 (Pattern Discovery)
 # Choose: 7 (Data Quality Report)
 # Select scope: All accounts / High-risk only / Current session
@@ -136,7 +136,7 @@ python3 cli_fraud_detection.py
 
 ### Test 1: Data Quality Report
 ```bash
-python3 cli_fraud_detection.py
+python run.py
 # Choose: 11 (Pattern Discovery)
 # Choose: 4 (All Data)
 # Choose: 7 (Data Quality Report)
@@ -147,7 +147,7 @@ python3 cli_fraud_detection.py
 
 ### Test 2: Session-Based Analysis
 ```bash
-python3 cli_fraud_detection.py
+python run.py
 # Choose: 11 (Pattern Discovery)
 # Choose: 2 (Latest Session)
 # Choose: 1 (Cluster Analysis)
@@ -168,7 +168,7 @@ python3 cli_fraud_detection.py
 ## Files Changed
 
 1. **requirements.txt** - Added ydata-profiling, featuretools, imbalanced-learn
-2. **cli_fraud_detection.py** - Added data quality report (Option 7)
+2. **Dashboard** - Data quality and analysis in the web UI
 3. **database.py** - Session tracking already implemented
 
 ---

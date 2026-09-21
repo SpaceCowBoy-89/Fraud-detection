@@ -1,0 +1,1498 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Affiliate {{ code }} — Fraud Intelligence</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=DM+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+    :root {
+      --bg:        #f7f6f3;
+      --surface:   #ffffff;
+      --surface2:  #f2f0ec;
+      --border:    #e8e5e0;
+      --border-strong: #ccc9c3;
+      --text:      #181612;
+      --text-2:    #5a564f;
+      --text-3:    #9b9690;
+      --mono:      'IBM Plex Mono', monospace;
+      --sans:      'DM Sans', system-ui, sans-serif;
+      --red:       #c8322b;
+      --red-bg:    rgba(200,50,43,0.08);
+      --red-border:rgba(200,50,43,0.2);
+      --amber:     #b45309;
+      --amber-bg:  rgba(180,83,9,0.08);
+      --green:     #15803d;
+      --green-bg:  rgba(21,128,61,0.08);
+      --blue:      #1d4ed8;
+      --blue-bg:   rgba(29,78,216,0.08);
+      --topbar-h:  56px;
+    }
+
+    html { font-size: 14px; }
+    body {
+      font-family: var(--sans);
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+    }
+
+    /* ── TOP BAR ── */
+    .topbar {
+      position: fixed;
+      top: 0; left: 0; right: 0;
+      height: var(--topbar-h);
+      background: #13120e;
+      display: flex;
+      align-items: center;
+      padding: 0 24px;
+      gap: 0;
+      z-index: 200;
+      border-bottom: 1px solid #2a2820;
+    }
+    .topbar-back {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      text-decoration: none;
+      color: #8a8479;
+      font-size: 12px;
+      font-weight: 500;
+      letter-spacing: 0.02em;
+      padding: 6px 12px 6px 8px;
+      border-radius: 6px;
+      border: 1px solid #2a2820;
+      transition: all 0.15s;
+      white-space: nowrap;
+    }
+    .topbar-back:hover { background: #1e1d19; color: #d4cfc7; border-color: #3a3830; }
+    .topbar-back svg { opacity: 0.6; }
+
+    .topbar-divider {
+      width: 1px;
+      height: 20px;
+      background: #2a2820;
+      margin: 0 16px;
+    }
+
+    .topbar-crumb {
+      font-size: 11px;
+      color: #524f48;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      font-weight: 500;
+    }
+    .topbar-crumb-sep { color: #2a2820; margin: 0 8px; }
+    .topbar-crumb-current { color: #8a8479; }
+
+    .topbar-actions {
+      margin-left: auto;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .topbar-btn {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 11px;
+      font-weight: 500;
+      letter-spacing: 0.03em;
+      padding: 6px 12px;
+      border-radius: 6px;
+      cursor: pointer;
+      border: 1px solid #2a2820;
+      background: none;
+      color: #6b6760;
+      transition: all 0.15s;
+      white-space: nowrap;
+    }
+    .topbar-btn:hover { background: #1e1d19; color: #c4bfb8; border-color: #3a3830; }
+    .topbar-btn.primary {
+      background: #1d4ed8;
+      border-color: #1d4ed8;
+      color: #fff;
+    }
+    .topbar-btn.primary:hover { background: #1e40af; border-color: #1e40af; }
+    .topbar-copied { color: #15803d !important; border-color: #166534 !important; }
+
+    /* ── PAGE LAYOUT ── */
+    .page {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: calc(var(--topbar-h) + 32px) 32px 64px;
+    }
+
+    /* ── AFFILIATE HEADER ── */
+    .aff-header {
+      margin-bottom: 32px;
+    }
+    .aff-header-top {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 24px;
+      margin-bottom: 20px;
+    }
+    .aff-identity {}
+    .aff-label {
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--text-3);
+      margin-bottom: 6px;
+    }
+    .aff-code-display {
+      font-family: var(--mono);
+      font-size: 28px;
+      font-weight: 600;
+      color: var(--text);
+      letter-spacing: -0.5px;
+      line-height: 1;
+    }
+    .aff-status-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-top: 10px;
+    }
+    .status-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.04em;
+      padding: 3px 10px;
+      border-radius: 100px;
+    }
+    .status-pill.danger  { background: var(--red-bg);   color: var(--red);   border: 1px solid var(--red-border); }
+    .status-pill.warning { background: var(--amber-bg); color: var(--amber); border: 1px solid rgba(180,83,9,0.2); }
+    .status-pill.safe    { background: var(--green-bg); color: var(--green); border: 1px solid rgba(21,128,61,0.2); }
+    .status-pill::before { content: ''; width: 5px; height: 5px; border-radius: 50%; background: currentColor; }
+
+    /* ── STAT STRIP ── */
+    .stat-strip {
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      overflow: hidden;
+    }
+    .stat-cell {
+      padding: 18px 20px;
+      border-right: 1px solid var(--border);
+      position: relative;
+    }
+    .stat-cell:last-child { border-right: none; }
+    .stat-cell-label {
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--text-3);
+      margin-bottom: 8px;
+    }
+    .stat-cell-value {
+      font-size: 24px;
+      font-weight: 700;
+      line-height: 1;
+      color: var(--text);
+      font-variant-numeric: tabular-nums;
+    }
+    .stat-cell-value.danger  { color: var(--red); }
+    .stat-cell-value.warning { color: var(--amber); }
+    .stat-cell-sub {
+      font-size: 11px;
+      color: var(--text-3);
+      margin-top: 5px;
+    }
+
+    /* ── CAMPAIGNS ROW ── */
+    .campaigns-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-top: 14px;
+    }
+    .camp-tag {
+      font-family: var(--mono);
+      font-size: 10px;
+      font-weight: 500;
+      color: var(--text-2);
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 3px 8px;
+      letter-spacing: 0.02em;
+      max-width: 180px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .camp-tag.clickable {
+      cursor: pointer;
+      transition: background 0.12s, border-color 0.12s, color 0.12s;
+    }
+    .camp-tag.clickable:hover {
+      background: var(--blue-bg);
+      border-color: rgba(29,78,216,0.25);
+      color: var(--blue);
+    }
+    .camp-tag.active {
+      background: var(--blue-bg);
+      border-color: rgba(29,78,216,0.35);
+      color: var(--blue);
+      font-weight: 600;
+    }
+    .camp-tag.more {
+      color: var(--text-3);
+      background: transparent;
+    }
+
+    /* ── SECTION ── */
+    .section {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      overflow: hidden;
+      margin-bottom: 16px;
+    }
+    .section-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 14px 20px;
+      border-bottom: 1px solid var(--border);
+      background: #faf9f6;
+    }
+    .section-title {
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--text-2);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .section-count {
+      font-family: var(--mono);
+      font-size: 11px;
+      color: var(--text-3);
+      font-weight: 400;
+    }
+    .section-actions {
+      display: flex;
+      gap: 8px;
+    }
+    .sec-btn {
+      font-family: var(--sans);
+      font-size: 11px;
+      font-weight: 500;
+      padding: 5px 12px;
+      border-radius: 6px;
+      border: 1px solid var(--border);
+      background: var(--surface);
+      color: var(--text-2);
+      cursor: pointer;
+      transition: all 0.15s;
+      display: flex;
+      align-items: center;
+      gap: 5px;
+    }
+    .sec-btn:hover { background: var(--surface2); border-color: var(--border-strong); color: var(--text); }
+
+    /* ── FILTER BAR ── */
+    .filter-bar {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      padding: 12px 20px;
+      border-bottom: 1px solid var(--border);
+      background: #fdfdfc;
+      flex-wrap: wrap;
+    }
+    .filter-bar input,
+    .filter-bar select {
+      font-family: var(--sans);
+      font-size: 12px;
+      color: var(--text);
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 7px 11px;
+      outline: none;
+      transition: border 0.15s;
+    }
+    .filter-bar input:focus,
+    .filter-bar select:focus { border-color: var(--blue); }
+    .filter-bar input {
+      flex: 1;
+      min-width: 200px;
+    }
+    .filter-bar input::placeholder { color: var(--text-3); }
+    .filter-tally {
+      font-family: var(--mono);
+      font-size: 11px;
+      color: var(--text-3);
+      margin-left: auto;
+      white-space: nowrap;
+    }
+
+    /* ── ACCOUNTS TABLE ── */
+    .acct-table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+    .acct-table thead tr {
+      background: #faf9f6;
+    }
+    .acct-table th {
+      padding: 10px 16px;
+      text-align: left;
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--text-3);
+      border-bottom: 1px solid var(--border);
+      white-space: nowrap;
+      cursor: pointer;
+      user-select: none;
+      transition: color 0.1s;
+    }
+    .acct-table th:hover { color: var(--text); }
+    .acct-table th.num { text-align: right; }
+    .acct-table th .sort-arrow { opacity: 0; font-size: 10px; }
+    .acct-table th.asc  .sort-arrow { opacity: 1; content: '↑'; }
+    .acct-table th.desc .sort-arrow { opacity: 1; }
+    .acct-table th.asc::after  { content: ' ↑'; color: var(--blue); font-size: 9px; }
+    .acct-table th.desc::after { content: ' ↓'; color: var(--blue); font-size: 9px; }
+
+    .acct-table td {
+      padding: 11px 16px;
+      font-size: 12px;
+      border-bottom: 1px solid var(--border);
+      vertical-align: middle;
+      transition: background 0.1s;
+    }
+    .acct-table tr:last-child td { border-bottom: none; }
+    .acct-table tbody tr {
+      cursor: pointer;
+    }
+    .acct-table tbody tr:hover td { background: #f5f3ef; }
+
+    .cell-email {
+      font-family: var(--mono);
+      font-size: 11.5px;
+      color: var(--text);
+      max-width: 260px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .cell-num { text-align: right; font-variant-numeric: tabular-nums; font-size: 12px; }
+    .cell-muted { color: var(--text-3); font-size: 11px; }
+
+    .risk-val {
+      font-weight: 700;
+      font-size: 13px;
+      font-variant-numeric: tabular-nums;
+    }
+    .risk-val.h { color: var(--red); }
+    .risk-val.m { color: var(--amber); }
+    .risk-val.l { color: var(--green); }
+
+    .camp-cell {
+      font-family: var(--mono);
+      font-size: 10px;
+      color: var(--text-2);
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 2px 7px;
+      max-width: 150px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      display: inline-block;
+    }
+    .camp-cell.clickable {
+      cursor: pointer;
+      transition: background 0.12s, border-color 0.12s, color 0.12s;
+    }
+    .camp-cell.clickable:hover {
+      background: var(--blue-bg);
+      border-color: rgba(29,78,216,0.25);
+      color: var(--blue);
+    }
+
+    .flag-tag {
+      display: inline-block;
+      font-size: 9.5px;
+      font-weight: 600;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      background: var(--red-bg);
+      color: var(--red);
+      border: 1px solid var(--red-border);
+      border-radius: 3px;
+      padding: 2px 6px;
+      margin-right: 3px;
+      white-space: nowrap;
+    }
+    .flag-tag.clickable-flag {
+      cursor: pointer;
+      transition: background 0.12s, border-color 0.12s, transform 0.1s;
+    }
+    .flag-tag.clickable-flag:hover {
+      background: rgba(200,50,43,0.18);
+      border-color: rgba(200,50,43,0.5);
+      transform: translateY(-1px);
+    }
+    .cell-mono {
+      font-family: var(--mono);
+      font-size: 11px;
+      color: var(--text-2);
+      max-width: 140px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      display: inline-block;
+    }
+    .flag-more {
+      font-size: 10px;
+      color: var(--text-3);
+    }
+
+    .type-pill {
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      padding: 2px 7px;
+      border-radius: 4px;
+    }
+    .type-pill.paid { background: var(--blue-bg); color: var(--blue); }
+    .type-pill.free { background: var(--surface2); color: var(--text-3); border: 1px solid var(--border); }
+
+    .empty-row td {
+      text-align: center;
+      padding: 48px;
+      color: var(--text-3);
+      font-size: 13px;
+    }
+
+    /* ── LOADING / ERROR ── */
+    .page-loading {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 40vh;
+      gap: 14px;
+      color: var(--text-3);
+    }
+    .spinner {
+      width: 28px; height: 28px;
+      border: 2px solid var(--border);
+      border-top-color: var(--blue);
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ── ANIMATIONS ── */
+    .fade-in {
+      animation: fadeIn 0.25s ease both;
+    }
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(6px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+
+    /* ── RESPONSIVE ── */
+    @media (max-width: 768px) {
+      .page { padding: calc(var(--topbar-h) + 20px) 16px 48px; }
+      .stat-strip { grid-template-columns: repeat(3, 1fr); }
+      .stat-strip .stat-cell:nth-child(n+4) { border-top: 1px solid var(--border); }
+      .aff-header-top { flex-direction: column; }
+    }
+    @media (max-width: 500px) {
+      .stat-strip { grid-template-columns: 1fr 1fr; }
+      .topbar-crumb { display: none; }
+    }
+
+    /* ── Pagination ── */
+    .pg-btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 28px;
+      height: 28px;
+      padding: 0 6px;
+      border: 1px solid var(--border);
+      border-radius: 5px;
+      background: var(--surface);
+      color: var(--text-2);
+      font-size: 12px;
+      cursor: pointer;
+      transition: background 0.1s, color 0.1s, border-color 0.1s;
+      font-family: var(--sans);
+    }
+    .pg-btn:hover:not(:disabled) { background: var(--surface2); color: var(--text); border-color: var(--blue); }
+    .pg-btn:disabled { opacity: 0.35; cursor: default; }
+    .pg-btn.active { background: var(--blue); color: #fff; border-color: var(--blue); font-weight: 600; }
+  </style>
+</head>
+<body>
+
+<!-- ── FIXED TOP BAR ── -->
+<header class="topbar">
+  <a class="topbar-back" href="/">
+    <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+      <path d="M9 11L5 7L9 3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+    </svg>
+    Dashboard
+  </a>
+  <div class="topbar-divider"></div>
+  <div class="topbar-crumb">
+    <span>Affiliates</span>
+    <span class="topbar-crumb-sep">/</span>
+    <span class="topbar-crumb-current" id="topbarCode">—</span>
+  </div>
+  <div class="topbar-actions">
+    <button class="topbar-btn" onclick="exportCSV()">
+      <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M6 1v7M3.5 6l2.5 2.5L8.5 6M2 10h8" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      Export CSV
+    </button>
+    <button class="topbar-btn" id="copyBtn" onclick="copyLink()">
+      <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M4.5 3H3a1 1 0 00-1 1v5a1 1 0 001 1h5a1 1 0 001-1v-1.5M7 1h3v3M9.5 2.5L5 7" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      Copy Link
+    </button>
+  </div>
+</header>
+
+<!-- ── MAIN PAGE ── -->
+<div class="page" id="page">
+  <div class="page-loading">
+    <div class="spinner"></div>
+    <span>Loading affiliate…</span>
+  </div>
+</div>
+
+<script>
+const CODE = {{ code | tojson }};
+/** Pre-fill account search when opening e.g. from Flags tab: /affiliate/CODE?q=geo_login_mismatch */
+const INITIAL_SEARCH = new URLSearchParams(window.location.search).get('q') || '';
+const INITIAL_CAMPAIGN = new URLSearchParams(window.location.search).get('campaign') || '';
+
+// ── State ────────────────────────────────────────────
+let _sortKey  = 'risk_score';
+let _sortDir  = 'desc';
+let _page     = 1;
+let _pageSize = 100;
+let _total    = 0;
+let _pages    = 1;
+let _stats    = {};
+let _campaigns = [];
+let _filterCampaign = INITIAL_CAMPAIGN;
+let _debounceTimer = null;
+/** Affiliate-level action from fraud-tool review (see affiliate_actions table). */
+let _affiliateAction = null;
+/** When false, show summary + Edit; when true, show full form. */
+let _affiliateToolFormExpanded = true;
+
+document.getElementById('topbarCode').textContent = CODE;
+
+// ── Bootstrap ────────────────────────────────────────
+async function loadAffiliate() {
+  const [statsRes, firstPage] = await Promise.all([
+    fetch('/api/affiliates').then(r => r.json()).catch(() => []),
+    fetchPage(1, false)
+  ]);
+
+  const statsArr = Array.isArray(statsRes) ? statsRes : (statsRes?.data || []);
+  _stats = statsArr.find(s => s.webmaster_code === CODE) || {};
+
+  if (!firstPage || firstPage.error) {
+    document.getElementById('page').innerHTML = `
+      <div class="page-loading" style="color:var(--red);">
+        <svg width="32" height="32" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="1.5"/><path d="M12 8v4M12 16h.01" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+        <span>Failed to load: ${firstPage?.error || 'Unknown error'}</span>
+        <a href="/" style="font-size:12px;color:var(--blue);text-decoration:none;">← Back to dashboard</a>
+      </div>`;
+    return;
+  }
+
+  _total  = firstPage.total  || 0;
+  _pages  = firstPage.pages  || 1;
+  _page   = firstPage.page   || 1;
+  _campaigns = firstPage.campaigns || [...new Set((firstPage.accounts || []).map(a => a.campaign).filter(Boolean))].sort((a, b) => a.localeCompare(b));
+  _affiliateAction = firstPage.affiliate_action || null;
+  _affiliateToolFormExpanded = !_affiliateAction;
+
+  buildShell();
+  renderRows(firstPage.accounts || []);
+}
+
+// ── Fetch a page from the API ─────────────────────────
+async function fetchPage(page, updateRows = true) {
+  const searchEl = document.getElementById('searchAccts');
+  const search = searchEl
+    ? String(searchEl.value || '').trim()
+    : String(INITIAL_SEARCH || '').trim();
+  const riskMin  = document.getElementById('filterRisk')?.value   || '';
+  const dataType = document.getElementById('filterType')?.value   || '';
+  const ipFlag   = document.getElementById('filterIpFlag')?.value || '';
+  const profilePic = document.getElementById('filterProfilePic')?.value || '';
+  const dateFrom = document.getElementById('filterDateFrom')?.value || '';
+  const dateTo   = document.getElementById('filterDateTo')?.value   || '';
+  const campaign = document.getElementById('filterCampaign')?.value || _filterCampaign || '';
+
+  const params = new URLSearchParams({
+    page,
+    page_size: _pageSize,
+    sort:      _sortKey,
+    dir:       _sortDir,
+  });
+  if (search)    params.set('q',          search);
+  if (campaign)  params.set('campaign',   campaign);
+  if (riskMin)   params.set('risk_min',   riskMin);
+  if (dataType)  params.set('data_type',  dataType);
+  if (ipFlag)    params.set('ip_flag',    ipFlag);
+  if (profilePic) params.set('profile_pic', profilePic);
+  if (dateFrom)  params.set('date_from',  dateFrom);
+  if (dateTo)    params.set('date_to',    dateTo);
+
+  if (updateRows) {
+    const tbody = document.getElementById('acctBody');
+    if (tbody) tbody.innerHTML = `<tr><td colspan="11" style="text-align:center;padding:24px;color:#999;">Loading…</td></tr>`;
+  }
+
+  const res = await fetch(`/api/affiliate/${encodeURIComponent(CODE)}/details?${params}`, { cache: 'no-store' })
+    .then(r => r.json())
+    .catch(e => ({ error: e.message }));
+
+  if (updateRows && !res.error) {
+    _total = res.total || 0;
+    _pages = res.pages || 1;
+    _page  = res.page  || page;
+    if (res.campaigns?.length) {
+      _campaigns = res.campaigns;
+      refreshCampaignFilterOptions();
+    }
+    if (Object.prototype.hasOwnProperty.call(res, 'affiliate_action')) {
+      _affiliateAction = res.affiliate_action;
+    }
+    renderRows(res.accounts || []);
+    updatePagination();
+  } else if (!res.error && Object.prototype.hasOwnProperty.call(res, 'affiliate_action')) {
+    _affiliateAction = res.affiliate_action;
+  }
+  return res;
+}
+
+function _taOpt(value, label, selected) {
+  const s = selected === value ? ' selected' : '';
+  return `<option value="${value}"${s}>${label}</option>`;
+}
+
+const _TA_STATUS_LAB = {
+  flagged: 'Flagged (triage)',
+  under_review: 'Under review',
+  actioned: 'Action taken',
+  monitoring: 'Monitoring',
+  cleared: 'Cleared (no action)',
+};
+const _TA_TYPE_LAB = {
+  traffic_closed: 'Traffic closed',
+  payout_withheld: 'Payout withheld',
+  warned: 'Warned',
+  capped: 'Capped / limited',
+  terminated: 'Terminated',
+  clawback_requested: 'Clawback requested',
+  clawback_received: 'Clawback received',
+  no_action: 'No platform action',
+};
+const _TA_TRIG_LAB = {
+  high_fraud_rate: 'High fraud rate',
+  discover_concentration: 'Discover concentration',
+  shared_card: 'Shared card',
+  shared_ip: 'Shared IP',
+  woman_concentration: 'Woman concentration',
+  sequential_email: 'Sequential email',
+  account_reviews: 'Account reviews',
+  enrichment: 'Admin enrichment',
+  manual: 'Manual / other',
+  other: 'Other',
+};
+
+function _taText(s) {
+  return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+/** Summary line for collapsed state (escaped). */
+function _taSummaryParts(a) {
+  const bits = [];
+  const st = a.action_status || '';
+  if (st) bits.push(_TA_STATUS_LAB[st] || _taText(st));
+  const at = a.action_type || '';
+  if (at) bits.push(_TA_TYPE_LAB[at] || _taText(at));
+  const tr = a.trigger_reason || '';
+  if (tr) bits.push(_TA_TRIG_LAB[tr] || _taText(tr));
+  return bits;
+}
+
+function expandAffiliateToolAction() {
+  _affiliateToolFormExpanded = true;
+  mountToolActionForm();
+}
+
+function mountToolActionForm() {
+  const el = document.getElementById('toolActionMount');
+  if (!el) return;
+  if (!_affiliateToolFormExpanded && !_affiliateAction) {
+    _affiliateToolFormExpanded = true;
+  }
+  const a = _affiliateAction || {};
+  const st = a.action_status || '';
+  const at = a.action_type || '';
+  const tr = a.trigger_reason || '';
+  const notes = a.notes || '';
+  const aa = a.actioned_at || '';
+  const rid = a.trigger_run_id || '';
+  const aaLocal = aa ? String(aa).replace(' ', 'T').slice(0, 16) : '';
+  const notesEsc = String(notes).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const ridEsc = String(rid).replace(/&/g, '&amp;').replace(/"/g, '&quot;');
+
+  if (!_affiliateToolFormExpanded && _affiliateAction) {
+    const parts = _taSummaryParts(a);
+    const summary = parts.length ? parts.join(' · ') : _taText(st || 'Record on file');
+    const notePreview = notes ? _taText(notes.length > 120 ? notes.slice(0, 117) + '…' : notes) : '';
+    el.innerHTML = `
+    <p style="font-size:12px;color:var(--text-2);margin:0 0 12px;line-height:1.45;">
+      Record what your team did <strong>because of this fraud-detection tool</strong>. This does not change scores — it is for close-the-loop reporting and badges on the main dashboard.
+    </p>
+    <div style="display:flex;flex-wrap:wrap;gap:12px 16px;align-items:flex-start;justify-content:space-between;padding:14px 16px;border:1px solid var(--border);border-radius:8px;background:var(--surface);">
+      <div style="min-width:0;flex:1;">
+        <div style="font-size:10px;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;color:var(--text-3);margin-bottom:6px;">Saved record</div>
+        <div style="font-size:13px;color:var(--text);font-weight:500;line-height:1.4;">${summary}</div>
+        ${notePreview ? `<div style="margin-top:8px;font-size:12px;color:var(--text-3);">${notePreview}</div>` : ''}
+      </div>
+      <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;">
+        <button type="button" class="topbar-btn primary" onclick="expandAffiliateToolAction()">Edit</button>
+        <button type="button" class="topbar-btn" onclick="clearAffiliateToolAction()">Clear record</button>
+      </div>
+    </div>
+    `;
+    return;
+  }
+
+  el.innerHTML = `
+    <p style="font-size:12px;color:var(--text-2);margin:0 0 14px;line-height:1.45;">
+      Record what your team did <strong>because of this fraud-detection tool</strong> (e.g. closed traffic, payout hold).
+      This does not change scores — it is for close-the-loop reporting and badges on the main dashboard.
+    </p>
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:12px 16px;align-items:end;">
+      <div>
+        <label style="display:block;font-size:10px;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;color:var(--text-3);margin-bottom:6px;">Status</label>
+        <select id="taStatus" style="width:100%;font-size:12px;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);">
+          ${_taOpt('', '— Not set —', st)}
+          ${_taOpt('flagged', 'Flagged (triage)', st)}
+          ${_taOpt('under_review', 'Under review', st)}
+          ${_taOpt('actioned', 'Action taken', st)}
+          ${_taOpt('monitoring', 'Monitoring', st)}
+          ${_taOpt('cleared', 'Cleared (no action)', st)}
+        </select>
+      </div>
+      <div>
+        <label style="display:block;font-size:10px;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;color:var(--text-3);margin-bottom:6px;">Action type</label>
+        <select id="taActionType" style="width:100%;font-size:12px;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);">
+          ${_taOpt('', '—', at)}
+          ${_taOpt('traffic_closed', 'Traffic closed', at)}
+          ${_taOpt('payout_withheld', 'Payout withheld', at)}
+          ${_taOpt('warned', 'Warned', at)}
+          ${_taOpt('capped', 'Capped / limited', at)}
+          ${_taOpt('terminated', 'Terminated', at)}
+          ${_taOpt('clawback_requested', 'Clawback requested', at)}
+          ${_taOpt('clawback_received', 'Clawback received', at)}
+          ${_taOpt('no_action', 'No platform action', at)}
+        </select>
+      </div>
+      <div>
+        <label style="display:block;font-size:10px;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;color:var(--text-3);margin-bottom:6px;">Primary signal</label>
+        <select id="taTrigger" style="width:100%;font-size:12px;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);">
+          ${_taOpt('', '—', tr)}
+          ${_taOpt('high_fraud_rate', 'High fraud rate', tr)}
+          ${_taOpt('discover_concentration', 'Discover concentration', tr)}
+          ${_taOpt('shared_card', 'Shared card', tr)}
+          ${_taOpt('shared_ip', 'Shared IP', tr)}
+          ${_taOpt('woman_concentration', 'Woman concentration', tr)}
+          ${_taOpt('sequential_email', 'Sequential email', tr)}
+          ${_taOpt('account_reviews', 'Account reviews', tr)}
+          ${_taOpt('enrichment', 'Admin enrichment', tr)}
+          ${_taOpt('manual', 'Manual / other', tr)}
+          ${_taOpt('other', 'Other', tr)}
+        </select>
+      </div>
+      <div>
+        <label style="display:block;font-size:10px;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;color:var(--text-3);margin-bottom:6px;">Actioned at (optional)</label>
+        <input id="taActionedAt" type="datetime-local" value="${aaLocal}"
+          style="width:100%;font-size:12px;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);">
+      </div>
+      <div style="grid-column:1/-1;">
+        <label style="display:block;font-size:10px;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;color:var(--text-3);margin-bottom:6px;">Pipeline run id (optional)</label>
+        <input id="taRunId" type="text" value="${ridEsc}" placeholder="e.g. from Pipeline history"
+          style="width:100%;max-width:420px;font-size:12px;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);font-family:var(--mono);">
+      </div>
+      <div style="grid-column:1/-1;">
+        <label style="display:block;font-size:10px;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;color:var(--text-3);margin-bottom:6px;">Notes</label>
+        <textarea id="taNotes" rows="3" placeholder="Internal notes…"
+          style="width:100%;font-size:12px;padding:10px 12px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);resize:vertical;font-family:var(--sans);">${notesEsc}</textarea>
+      </div>
+    </div>
+    <div style="display:flex;flex-wrap:wrap;gap:10px;margin-top:16px;align-items:center;">
+      <button type="button" class="topbar-btn primary" id="taSaveBtn" onclick="saveAffiliateToolAction()">Save</button>
+      <button type="button" class="topbar-btn" onclick="clearAffiliateToolAction()" ${_affiliateAction ? '' : 'disabled'}>Clear record</button>
+      <span id="taMsg" style="font-size:12px;color:var(--text-3);"></span>
+    </div>
+  `;
+}
+
+async function saveAffiliateToolAction() {
+  const msg = document.getElementById('taMsg');
+  const btn = document.getElementById('taSaveBtn');
+  const status = document.getElementById('taStatus')?.value || '';
+  if (!status) {
+    if (msg) msg.textContent = 'Choose a status or use Clear record.';
+    return;
+  }
+  const payload = {
+    webmaster_code: CODE,
+    action_status: status,
+    action_type: document.getElementById('taActionType')?.value || null,
+    trigger_reason: document.getElementById('taTrigger')?.value || null,
+    notes: document.getElementById('taNotes')?.value || '',
+    trigger_run_id: document.getElementById('taRunId')?.value || null,
+  };
+  // Always send actioned_at: ISO string, or null to clear. Omitting it used to make the API
+  // default to "now" for actioned status, which overwrote a date-only / incomplete picker value.
+  let dt = String(document.getElementById('taActionedAt')?.value || '').trim();
+  if (dt) {
+    if (/^\d{4}-\d{2}-\d{2}$/.test(dt)) dt = `${dt}T00:00`;
+    const parsed = new Date(dt);
+    if (Number.isNaN(parsed.getTime())) {
+      if (msg) msg.textContent = 'Invalid Actioned at — pick a full date and time.';
+      if (btn) btn.disabled = false;
+      return;
+    }
+    payload.actioned_at = parsed.toISOString();
+  } else {
+    payload.actioned_at = null;
+  }
+  if (btn) { btn.disabled = true; }
+  if (msg) msg.textContent = 'Saving…';
+  try {
+    const res = await fetch('/api/affiliate-actions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || res.statusText);
+    _affiliateAction = data.affiliate_action || null;
+    _affiliateToolFormExpanded = false;
+    mountToolActionForm();
+    window.alert('Affiliate action saved. It will appear on the main dashboard for reporting and badges.');
+  } catch (e) {
+    if (msg) msg.textContent = 'Error: ' + e.message;
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+async function clearAffiliateToolAction() {
+  if (!confirm('Remove the affiliate action record for ' + CODE + '?')) return;
+  const msg = document.getElementById('taMsg');
+  if (msg) msg.textContent = '…';
+  try {
+    const res = await fetch('/api/affiliate-actions/' + encodeURIComponent(CODE), { method: 'DELETE' });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || res.statusText);
+    _affiliateAction = null;
+    _affiliateToolFormExpanded = true;
+    mountToolActionForm();
+  } catch (e) {
+    if (msg) msg.textContent = 'Error: ' + e.message;
+  }
+}
+
+// ── Build the page shell (header + table skeleton) ────
+function buildShell() {
+  const totalAccounts = _stats.total_accounts   || _total;
+  const highRisk      = _stats.high_risk_count  || 0;
+  const medRisk       = _stats.medium_risk_count || 0;
+  const highPct       = totalAccounts > 0 ? (highRisk / totalAccounts * 100) : 0;
+  const totalPayout   = _stats.total_payout      || 0;
+  const avgRisk       = _stats.avg_risk_score    ?? 0;
+  const cfCount       = Number(_stats.confirmed_fraud_count || 0);
+  const cfPayout      = Number(_stats.confirmed_fraud_payout || 0);
+
+  const riskStatus = highPct >= 30 ? ['danger','HIGH FRAUD RISK'] : highPct >= 15 ? ['warning','ELEVATED RISK'] : ['safe','LOW RISK'];
+
+  document.title = `${CODE} — Affiliate Detail`;
+
+  document.getElementById('page').innerHTML = `
+    <div class="aff-header fade-in">
+      <div class="aff-header-top">
+        <div class="aff-identity">
+          <div class="aff-label">Affiliate Code</div>
+          <div class="aff-code-display">${CODE}</div>
+          <div class="aff-status-row">
+            <span class="status-pill ${riskStatus[0]}">${riskStatus[1]}</span>
+            ${_campaigns.length > 0 ? `<span style="font-size:11px;color:var(--text-3);">${_campaigns.length} campaign${_campaigns.length !== 1 ? 's' : ''}</span>` : ''}
+          </div>
+          ${_campaigns.length > 0 ? `
+          <div class="campaigns-row" id="campaignTagsRow">
+            ${_campaigns.slice(0, 8).map(c => `<span class="camp-tag clickable${_filterCampaign === c ? ' active' : ''}" title="Filter by ${c.replace(/"/g, '&quot;')}" onclick="filterByCampaign(${JSON.stringify(c)})">${c}</span>`).join('')}
+            ${_campaigns.length > 8 ? `<span class="camp-tag more">+${_campaigns.length - 8} more</span>` : ''}
+          </div>` : ''}
+        </div>
+      </div>
+
+      <div class="stat-strip">
+        <div class="stat-cell">
+          <div class="stat-cell-label">Total Accounts</div>
+          <div class="stat-cell-value">${totalAccounts.toLocaleString()}</div>
+          <div class="stat-cell-sub">analyzed</div>
+        </div>
+        <div class="stat-cell">
+          <div class="stat-cell-label">High Risk</div>
+          <div class="stat-cell-value ${highRisk > 0 ? 'danger' : ''}">${highRisk.toLocaleString()}</div>
+          <div class="stat-cell-sub">score ≥ 50</div>
+        </div>
+        <div class="stat-cell">
+          <div class="stat-cell-label">High Risk %</div>
+          <div class="stat-cell-value ${highPct >= 30 ? 'danger' : highPct >= 15 ? 'warning' : ''}">${highPct.toFixed(1)}%</div>
+          <div class="stat-cell-sub">${medRisk} medium risk</div>
+        </div>
+        <div class="stat-cell">
+          <div class="stat-cell-label">Avg Risk Score</div>
+          <div class="stat-cell-value ${avgRisk >= 50 ? 'danger' : avgRisk >= 25 ? 'warning' : ''}">${Number(avgRisk).toFixed(1)}</div>
+          <div class="stat-cell-sub">out of 100</div>
+        </div>
+        <div class="stat-cell">
+          <div class="stat-cell-label">Total Payout</div>
+          <div class="stat-cell-value">$${Number(totalPayout).toLocaleString('en-US', {minimumFractionDigits: 0, maximumFractionDigits: 0})}</div>
+          <div class="stat-cell-sub">all time</div>
+        </div>
+        <div class="stat-cell">
+          <div class="stat-cell-label">Confirmed fraud</div>
+          <div class="stat-cell-value ${cfCount > 0 ? 'danger' : ''}">${cfCount.toLocaleString()}</div>
+          <div class="stat-cell-sub">accounts reviewed</div>
+        </div>
+        <div class="stat-cell">
+          <div class="stat-cell-label">Confirmed fraud $</div>
+          <div class="stat-cell-value ${cfPayout > 0 ? 'danger' : ''}">$${cfPayout.toLocaleString('en-US', {minimumFractionDigits: 0, maximumFractionDigits: 0})}</div>
+          <div class="stat-cell-sub">loss est. (payout or actual loss)</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="section fade-in" id="toolActionSection" style="animation-delay:0.03s">
+      <div class="section-head">
+        <div class="section-title">Fraud tool — affiliate action</div>
+        <span class="section-count">Close-the-loop</span>
+      </div>
+      <div id="toolActionMount" style="padding:16px 20px;"></div>
+    </div>
+
+    <!-- Accounts table -->
+    <div class="section fade-in" style="animation-delay:0.05s">
+      <div class="section-head">
+        <div class="section-title">
+          Accounts
+          <span class="section-count" id="acctCount"></span>
+        </div>
+      </div>
+      <div class="filter-bar">
+        <input type="text" id="searchAccts" placeholder="Search by email, flag, DUID…"
+               oninput="debounceFilter()">
+        <select id="filterCampaign" onchange="onCampaignFilterChange()">
+          <option value="">All Campaigns</option>
+        </select>
+        <select id="filterRisk" onchange="applyFilters()">
+          <option value="">All Risk Levels</option>
+          <option value="50">High Risk (50+)</option>
+          <option value="25">Medium+ (25+)</option>
+        </select>
+        <select id="filterType" onchange="applyFilters()">
+          <option value="">All Types</option>
+          <option value="paid">Paid</option>
+          <option value="free">Free</option>
+        </select>
+        <select id="filterIpFlag" onchange="applyFilters()">
+          <option value="">All IPs</option>
+          <option value="proxy">Proxy</option>
+          <option value="hosting">Hosting / DC</option>
+          <option value="either">Proxy or Hosting</option>
+        </select>
+        <select id="filterProfilePic" onchange="applyFilters()" title="Requires Admin enrichment for pic status">
+          <option value="">All profile pics</option>
+          <option value="has">Has profile pic</option>
+          <option value="none">No profile pic</option>
+          <option value="not_enriched">Not enriched</option>
+          <option value="content_review">Content review</option>
+        </select>
+        <input type="date" id="filterDateFrom" onchange="applyFilters()" title="From date" style="font-size:12px;">
+        <input type="date" id="filterDateTo"   onchange="applyFilters()" title="To date"   style="font-size:12px;">
+        <select id="pageSizeSel" onchange="changePageSize()" style="min-width:90px;">
+          <option value="50">50 / page</option>
+          <option value="100" selected>100 / page</option>
+          <option value="200">200 / page</option>
+        </select>
+        <span class="filter-tally" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+          <span id="filterTallyBadge"></span>
+          <span id="filterTallyTotal" style="color:var(--text-3);font-size:11px;"></span>
+        </span>
+      </div>
+      <div style="overflow-x:auto;">
+        <table class="acct-table">
+          <thead>
+            <tr>
+              <th onclick="sortBy('email')">Email</th>
+              <th class="num desc" id="th-risk_score" onclick="sortBy('risk_score')">Risk</th>
+              <th class="num" id="th-payout_amount" onclick="sortBy('payout_amount')">Payout</th>
+              <th id="th-trans_datetime" onclick="sortBy('trans_datetime')">Date</th>
+              <th id="th-campaign" onclick="sortBy('campaign')">Campaign</th>
+              <th id="th-ad_id">Ad ID</th>
+              <th>Flags</th>
+              <th>Review</th>
+              <th id="th-data_type" onclick="sortBy('data_type')">Type</th>
+              <th id="th-ip_proxy" onclick="sortBy('ip_proxy')" title="Sort by IP flags (Proxy / Hosting)">IP Flag</th>
+              <th style="width:20px;"></th>
+            </tr>
+          </thead>
+          <tbody id="acctBody">
+            <tr><td colspan="11" style="text-align:center;padding:32px;color:#999;">Loading…</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <!-- Pagination bar -->
+      <div id="paginationBar" style="display:flex;align-items:center;justify-content:space-between;
+           padding:12px 16px;border-top:1px solid var(--border);background:var(--surface2);
+           font-size:12px;color:var(--text-2);gap:12px;flex-wrap:wrap;">
+        <span id="pageInfo" style="color:var(--text-3);"></span>
+        <div style="display:flex;align-items:center;gap:6px;">
+          <button id="btnFirst" onclick="goPage(1)"       class="pg-btn" title="First page">«</button>
+          <button id="btnPrev"  onclick="goPage(_page-1)" class="pg-btn" title="Previous">‹</button>
+          <span id="pageNums" style="display:flex;gap:4px;"></span>
+          <button id="btnNext"  onclick="goPage(_page+1)" class="pg-btn" title="Next">›</button>
+          <button id="btnLast"  onclick="goPage(_pages)"  class="pg-btn" title="Last page">»</button>
+        </div>
+        <span id="jumpWrap">
+          Go to page:
+          <input id="jumpInput" type="number" min="1" style="width:54px;padding:4px 6px;
+                 border:1px solid var(--border);border-radius:4px;font-size:11px;
+                 background:var(--surface);color:var(--text);"
+                 onkeydown="if(event.key==='Enter') goPage(parseInt(this.value))">
+        </span>
+      </div>
+    </div>
+  `;
+
+  const si = document.getElementById('searchAccts');
+  if (si && INITIAL_SEARCH) si.value = INITIAL_SEARCH;
+  refreshCampaignFilterOptions();
+  updateFilterIndicators();
+  updatePagination();
+  mountToolActionForm();
+}
+
+function refreshCampaignFilterOptions() {
+  const sel = document.getElementById('filterCampaign');
+  if (!sel) return;
+  const current = _filterCampaign || sel.value || '';
+  sel.innerHTML = '<option value="">All Campaigns</option>' +
+    _campaigns.map(c => `<option value="${String(c).replace(/"/g, '&quot;')}"${current === c ? ' selected' : ''}>${c}</option>`).join('');
+  if (current) sel.value = current;
+}
+
+function syncCampaignTagsActive() {
+  document.querySelectorAll('#campaignTagsRow .camp-tag.clickable').forEach(el => {
+    const title = el.getAttribute('title') || '';
+    const name = title.replace(/^Filter by /, '');
+    el.classList.toggle('active', !!_filterCampaign && name === _filterCampaign);
+  });
+}
+
+// ── Render rows into the table body ──────────────────
+function formatReviewCell(a) {
+  const o = a.review_outcome;
+  if (!o) return '<span class="cell-muted">—</span>';
+  const map = { confirmed_fraud: 'Fraud', false_positive: 'False +', under_review: 'Review', legitimate: 'Legit' };
+  const lbl = map[o] || String(o).replace(/_/g, ' ');
+  const cf = a.confirmed_fraud_payout;
+  const amt = (o === 'confirmed_fraud' && cf != null && cf !== '' && !Number.isNaN(Number(cf)) && Number(cf) > 0)
+    ? `<div style="font-size:10px;color:var(--red);font-weight:600;">$${Number(cf).toFixed(0)}</div>` : '';
+  return `<span style="font-size:11px;font-weight:600;">${lbl}</span>${amt}`;
+}
+
+function renderRows(accounts) {
+  const tbody = document.getElementById('acctBody');
+  if (!tbody) return;
+
+  ['email','risk_score','payout_amount','campaign','ad_id','trans_datetime','data_type','ip_proxy'].forEach(k => {
+    const el = document.getElementById(`th-${k}`);
+    if (el) { el.classList.remove('asc','desc'); if (_sortKey === k) el.classList.add(_sortDir); }
+  });
+
+  if (!accounts.length) {
+    tbody.innerHTML = `<tr class="empty-row"><td colspan="11">No accounts match the current filters.</td></tr>`;
+    return;
+  }
+
+  tbody.innerHTML = accounts.map(a => {
+    const risk  = a.risk_score ?? null;
+    const rCls  = risk >= 50 ? 'h' : risk >= 25 ? 'm' : 'l';
+
+    let flags = [];
+    try { flags = JSON.parse((a.flags || '[]').replace(/'/g, '"')); }
+    catch { if (a.flags) flags = [a.flags]; }
+
+    const flagHtml = flags.length === 0
+      ? '<span class="cell-muted">—</span>'
+      : flags.slice(0, 3).map(f => `<span class="flag-tag clickable-flag" onclick="filterByFlag('${String(f).replace(/'/g, "\\'")}')" title="Filter by this flag">${String(f).replace(/_/g,' ')}</span>`).join('')
+        + (flags.length > 3 ? `<span class="flag-more" onclick="event.stopPropagation()"> +${flags.length-3}</span>` : '');
+
+    const typeHtml = a.data_type
+      ? `<span class="type-pill ${a.data_type}">${a.data_type}</span>`
+      : '<span class="cell-muted">—</span>';
+
+    const ipFlagHtml = (() => {
+      const parts = [];
+      if (a.ip_proxy)   parts.push('<span style="background:rgba(239,68,68,0.12);color:#ef4444;padding:1px 6px;border-radius:3px;font-size:10px;font-weight:700;white-space:nowrap;">PROXY</span>');
+      if (a.ip_hosting) parts.push('<span style="background:rgba(245,158,11,0.12);color:#f59e0b;padding:1px 6px;border-radius:3px;font-size:10px;font-weight:700;white-space:nowrap;">DC</span>');
+      return parts.length ? parts.join(' ') : '<span class="cell-muted">—</span>';
+    })();
+
+    return `<tr data-duid="${a.duid}" class="acct-row" title="DUID: ${a.duid}">
+      <td><div class="cell-email" title="${a.email || ''}">${a.email || '<span class="cell-muted">—</span>'}</div></td>
+      <td class="cell-num"><span class="risk-val ${rCls}">${risk ?? '—'}</span></td>
+      <td class="cell-num">${a.payout_amount != null && a.payout_amount !== '' ? '$' + Number(a.payout_amount).toFixed(2) : '<span class="cell-muted">—</span>'}</td>
+      <td style="white-space:nowrap;font-size:12px;color:var(--text-2);">${a.trans_datetime ? a.trans_datetime.slice(0,10) : '<span class="cell-muted">—</span>'}</td>
+      <td>${a.campaign ? `<span class="camp-cell clickable" title="Filter by ${String(a.campaign).replace(/"/g, '&quot;')}" onclick="event.stopPropagation();filterByCampaign(${JSON.stringify(a.campaign)})">${a.campaign}</span>` : '<span class="cell-muted">—</span>'}</td>
+      <td><span class="cell-mono" title="${a.ad_id || ''}">${a.ad_id || '<span class="cell-muted">—</span>'}</span></td>
+      <td>${flagHtml}</td>
+      <td style="white-space:nowrap;">${formatReviewCell(a)}</td>
+      <td>${typeHtml}</td>
+      <td style="white-space:nowrap;">${ipFlagHtml}</td>
+      <td style="text-align:right;padding-right:12px;color:#ccc;font-size:11px;">→</td>
+    </tr>`;
+  }).join('');
+}
+
+// ── Pagination controls ───────────────────────────────
+function updatePagination() {
+  const start = (_page - 1) * _pageSize + 1;
+  const end   = Math.min(_page * _pageSize, _total);
+
+  const info = document.getElementById('pageInfo');
+  if (info) info.textContent = _total > 0
+    ? `Showing ${start.toLocaleString()}–${end.toLocaleString()} of ${_total.toLocaleString()} accounts`
+    : 'No accounts found';
+
+  const tallyTotal = document.getElementById('filterTallyTotal');
+  const count = document.getElementById('acctCount');
+  if (tallyTotal) tallyTotal.textContent = `${_total.toLocaleString()} total`;
+  if (count) count.textContent = `(${_total.toLocaleString()})`;
+
+  const setDisabled = (id, disabled) => { const el = document.getElementById(id); if (el) el.disabled = disabled; };
+  setDisabled('btnFirst', _page <= 1);
+  setDisabled('btnPrev',  _page <= 1);
+  setDisabled('btnNext',  _page >= _pages);
+  setDisabled('btnLast',  _page >= _pages);
+
+  const nums = document.getElementById('pageNums');
+  if (nums) {
+    const range = pagePillRange(_page, _pages);
+    nums.innerHTML = range.map(p =>
+      p === '…'
+        ? `<span style="color:#aaa;padding:0 4px;">…</span>`
+        : `<button onclick="goPage(${p})" class="pg-btn ${p === _page ? 'active' : ''}">${p}</button>`
+    ).join('');
+  }
+
+  const jump = document.getElementById('jumpInput');
+  if (jump) { jump.max = _pages; jump.placeholder = `1–${_pages}`; }
+  const jumpWrap = document.getElementById('jumpWrap');
+  if (jumpWrap) jumpWrap.style.display = _pages > 5 ? '' : 'none';
+}
+
+function pagePillRange(current, total) {
+  if (total <= 7) return Array.from({length: total}, (_, i) => i + 1);
+  const result = [];
+  const left  = Math.max(2, current - 2);
+  const right = Math.min(total - 1, current + 2);
+  result.push(1);
+  if (left > 2) result.push('…');
+  for (let i = left; i <= right; i++) result.push(i);
+  if (right < total - 1) result.push('…');
+  result.push(total);
+  return result;
+}
+
+async function goPage(p) {
+  p = Math.max(1, Math.min(_pages, parseInt(p) || 1));
+  if (p === _page) return;
+  _page = p;
+  updatePagination();
+  await fetchPage(p);
+  document.querySelector('.section')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+// ── Filters & sort ─────────────────────────────────────
+function debounceFilter() {
+  clearTimeout(_debounceTimer);
+  _debounceTimer = setTimeout(applyFilters, 350);
+}
+
+function applyFilters() {
+  _page = 1;
+  _filterCampaign = document.getElementById('filterCampaign')?.value || '';
+  syncUrlParams();
+  updateFilterIndicators();
+  fetchPage(1);
+}
+
+function onCampaignFilterChange() {
+  _filterCampaign = document.getElementById('filterCampaign')?.value || '';
+  syncCampaignTagsActive();
+  applyFilters();
+}
+
+function filterByCampaign(campaignName) {
+  const sel = document.getElementById('filterCampaign');
+  if (!sel) return;
+  if (_filterCampaign === campaignName) {
+    _filterCampaign = '';
+    sel.value = '';
+  } else {
+    _filterCampaign = campaignName;
+    sel.value = campaignName;
+  }
+  syncCampaignTagsActive();
+  applyFilters();
+  sel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+function syncUrlParams() {
+  const params = new URLSearchParams(window.location.search);
+  const search = document.getElementById('searchAccts')?.value?.trim() || '';
+  if (search) params.set('q', search); else params.delete('q');
+  if (_filterCampaign) params.set('campaign', _filterCampaign); else params.delete('campaign');
+  const qs = params.toString();
+  const next = qs ? `${window.location.pathname}?${qs}` : window.location.pathname;
+  window.history.replaceState(null, '', next);
+}
+
+function filterByFlag(flagName) {
+  const input = document.getElementById('searchAccts');
+  if (!input) return;
+  // If already filtering by this exact flag, clear it
+  if (input.value.trim().toLowerCase() === flagName.toLowerCase()) {
+    input.value = '';
+  } else {
+    input.value = flagName;
+  }
+  applyFilters();
+  input.focus();
+}
+
+function updateFilterIndicators() {
+  const search = document.getElementById('searchAccts')?.value?.trim() || '';
+  const badge = document.getElementById('filterTallyBadge');
+  if (!badge) return;
+  const parts = [];
+  if (_filterCampaign) {
+    parts.push(`<span style="display:inline-flex;align-items:center;gap:4px;background:var(--blue-bg);color:var(--blue);
+      border:1px solid rgba(29,78,216,0.2);border-radius:4px;padding:2px 8px;font-size:11px;font-weight:500;">
+      Campaign: "${String(_filterCampaign).replace(/"/g, '&quot;')}"
+      <button onclick="clearCampaignFilter()" style="background:none;border:none;cursor:pointer;color:var(--blue);
+        font-size:13px;line-height:1;padding:0 0 0 2px;" title="Clear campaign filter">×</button>
+    </span>`);
+  }
+  if (search) {
+    parts.push(`<span style="display:inline-flex;align-items:center;gap:4px;background:var(--blue-bg);color:var(--blue);
+      border:1px solid rgba(29,78,216,0.2);border-radius:4px;padding:2px 8px;font-size:11px;font-weight:500;">
+      Search: "${search.replace(/"/g, '&quot;')}"
+      <button onclick="clearFlagFilter()" style="background:none;border:none;cursor:pointer;color:var(--blue);
+        font-size:13px;line-height:1;padding:0 0 0 2px;" title="Clear search">×</button>
+    </span>`);
+  }
+  const profilePic = document.getElementById('filterProfilePic')?.value || '';
+  const profileLabels = { has: 'Has profile pic', none: 'No profile pic', not_enriched: 'Not enriched', content_review: 'Content review' };
+  if (profilePic && profileLabels[profilePic]) {
+    parts.push(`<span style="display:inline-flex;align-items:center;gap:4px;background:var(--amber-bg, rgba(245,158,11,0.12));color:var(--amber, #d97706);
+      border:1px solid rgba(217,119,6,0.25);border-radius:4px;padding:2px 8px;font-size:11px;font-weight:500;">
+      ${profileLabels[profilePic]}
+      <button onclick="document.getElementById('filterProfilePic').value='';applyFilters();" style="background:none;border:none;cursor:pointer;color:inherit;
+        font-size:13px;line-height:1;padding:0 0 0 2px;" title="Clear profile pic filter">×</button>
+    </span>`);
+  }
+  badge.innerHTML = parts.join('');
+}
+
+function clearCampaignFilter() {
+  _filterCampaign = '';
+  const sel = document.getElementById('filterCampaign');
+  if (sel) sel.value = '';
+  syncCampaignTagsActive();
+  applyFilters();
+}
+
+function clearFlagFilter() {
+  const input = document.getElementById('searchAccts');
+  if (input) input.value = '';
+  applyFilters();
+}
+
+function changePageSize() {
+  _pageSize = parseInt(document.getElementById('pageSizeSel')?.value || '100');
+  _page = 1;
+  fetchPage(1);
+}
+
+function sortBy(key) {
+  if (_sortKey === key) { _sortDir = _sortDir === 'asc' ? 'desc' : 'asc'; }
+  else { _sortKey = key; _sortDir = (key === 'risk_score' || key === 'payout_amount') ? 'desc' : 'asc'; }
+  _page = 1;
+  fetchPage(1);
+}
+
+// ── Export (fetches up to 5000 rows matching current filters) ──
+function exportCSV() {
+  const search   = document.getElementById('searchAccts')?.value?.trim() || '';
+  const campaign = document.getElementById('filterCampaign')?.value || _filterCampaign || '';
+  const riskMin  = document.getElementById('filterRisk')?.value   || '';
+  const dataType = document.getElementById('filterType')?.value   || '';
+  const ipFlag   = document.getElementById('filterIpFlag')?.value || '';
+  const profilePic = document.getElementById('filterProfilePic')?.value || '';
+  const dateFrom = document.getElementById('filterDateFrom')?.value || '';
+  const dateTo   = document.getElementById('filterDateTo')?.value   || '';
+  // Full export (no risk floor): sort by date so LIMIT isn't "top N by risk" (which is almost all high-risk).
+  // Filtered by risk: keep table sort (usually risk_score desc).
+  const exportSort = riskMin ? _sortKey : 'trans_datetime';
+  const exportDir  = riskMin ? _sortDir : 'desc';
+  const params = new URLSearchParams({ page: 1, page_size: 5000, sort: exportSort, dir: exportDir });
+  if (search)   params.set('q',         search);
+  if (campaign) params.set('campaign',  campaign);
+  if (riskMin)  params.set('risk_min',  riskMin);
+  if (dataType) params.set('data_type', dataType);
+  if (ipFlag)   params.set('ip_flag',   ipFlag);
+  if (profilePic) params.set('profile_pic', profilePic);
+  if (dateFrom) params.set('date_from', dateFrom);
+  if (dateTo)   params.set('date_to',   dateTo);
+
+  const ts = new Date();
+  const stamp = ts.toISOString().slice(0, 19).replace(/[:-]/g, '').replace('T', '_');
+  const parts = [];
+  if (riskMin === '50') parts.push('highrisk');
+  else if (riskMin === '25') parts.push('medplus');
+  if (dataType) parts.push(dataType);
+  if (campaign) parts.push('campaign');
+  if (search) parts.push('filtered');
+  const suffix = parts.length ? '_' + parts.join('-') : '_all';
+
+  fetch(`/api/affiliate/${encodeURIComponent(CODE)}/details?${params}`, { cache: 'no-store' })
+    .then(r => r.json())
+    .then(res => {
+      if (res.error) {
+        alert('Export failed: ' + res.error);
+        return;
+      }
+      const rows = res.accounts || [];
+      const hdrs = ['duid','email','risk_score','payout_amount','trans_datetime','campaign','ad_id','data_type','flags','review_outcome','confirmed_fraud_payout','custom_u1','geo_country','ip','profile_image_uploaded','profile_image_upload_seconds','admin_enriched','needs_content_review','review_url'];
+
+      function boolCell(val) {
+        if (val === true || val === 1 || val === '1') return 'Y';
+        if (val === false || val === 0 || val === '0') return 'N';
+        return val == null || val === '' ? '' : String(val);
+      }
+
+      function needsReviewCell(row) {
+        if (row.needs_content_review) return row.needs_content_review;
+        const flags = row.flags || '';
+        if (String(flags).includes('CONTENT_REVIEW')) return 'Y';
+        return 'N';
+      }
+
+      function normaliseFlags(val) {
+        if (!val) return '';
+        let arr = val;
+        if (typeof val === 'string') {
+          try { arr = JSON.parse(val.replace(/'/g, '"')); } catch(e) { return val.replace(/[\u2192→]/g, '->'); }
+        }
+        if (!Array.isArray(arr)) return String(val).replace(/[\u2192→]/g, '->');
+        return arr.map(f => String(f).replace(/[\u2192→]/g, '->')).join(' | ');
+      }
+
+      function csvCell(h, val, row) {
+        let s;
+        if (h === 'flags') s = normaliseFlags(val);
+        else if (h === 'profile_image_uploaded' || h === 'admin_enriched') s = boolCell(val);
+        else if (h === 'needs_content_review') s = needsReviewCell(row || {});
+        else if (h === 'review_url') s = row && row.duid ? `/account/${row.duid}` : '';
+        else s = val == null ? '' : String(val);
+        // Wrap in double-quotes and escape any inner double-quotes
+        return '"' + s.replace(/"/g, '""') + '"';
+      }
+
+      // UTF-8 BOM so Excel opens with correct encoding
+      const BOM = '\ufeff';
+      const csv = BOM + [hdrs.join(','), ...rows.map(r => hdrs.map(h => csvCell(h, r[h], r)).join(','))].join('\n');
+      const a    = Object.assign(document.createElement('a'), {
+        href: URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8;' })),
+        download: `affiliate_${CODE}_accounts${suffix}_${stamp}.csv`
+      });
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(a.href), 1500);
+    })
+    .catch(e => alert('Export failed: ' + e.message));
+}
+
+function copyLink() {
+  const btn = document.getElementById('copyBtn');
+  navigator.clipboard.writeText(window.location.href).then(() => {
+    btn.classList.add('topbar-copied');
+    btn.innerHTML = `<svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg> Copied`;
+    setTimeout(() => {
+      btn.classList.remove('topbar-copied');
+      btn.innerHTML = `<svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M4.5 3H3a1 1 0 00-1 1v5a1 1 0 001 1h5a1 1 0 001-1v-1.5M7 1h3v3M9.5 2.5L5 7" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg> Copy Link`;
+    }, 2000);
+  });
+}
+
+// ── Row-click delegation (skips flag pills) ──────────
+document.addEventListener('click', e => {
+  const row = e.target.closest('tr.acct-row');
+  if (!row) return;
+  if (e.target.closest('.flag-tag,.flag-more,.camp-cell')) return;
+  const duid = row.dataset.duid;
+  if (duid) window.location = '/account/' + encodeURIComponent(duid);
+});
+
+loadAffiliate();
+</script>
+</body>
+</html>

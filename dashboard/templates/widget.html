@@ -1,0 +1,407 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Fraud Risk — {{ duid }}</title>
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+*, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+:root {
+  --bg: #ffffff;
+  --bg-secondary: #f8fafc;
+  --border: #e2e8f0;
+  --text: #0f172a;
+  --text-secondary: #64748b;
+  --text-muted: #94a3b8;
+  --accent: #2563eb;
+  --risk-high: #dc2626;
+  --risk-high-bg: rgba(220,38,38,0.08);
+  --risk-medium: #d97706;
+  --risk-medium-bg: rgba(217,119,6,0.08);
+  --risk-low: #059669;
+  --risk-low-bg: rgba(5,150,105,0.08);
+  --sans: 'Outfit', system-ui, sans-serif;
+  --mono: 'IBM Plex Mono', monospace;
+  --shadow: 0 1px 3px rgba(0,0,0,0.08), 0 4px 12px rgba(0,0,0,0.04);
+  --radius: 12px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #141418;
+    --bg-secondary: #1a1a1f;
+    --border: #27272a;
+    --text: #fafafa;
+    --text-secondary: #a1a1aa;
+    --text-muted: #52525b;
+    --risk-high-bg: rgba(220,38,38,0.12);
+    --risk-medium-bg: rgba(217,119,6,0.12);
+    --risk-low-bg: rgba(5,150,105,0.12);
+    --shadow: 0 1px 3px rgba(0,0,0,0.4), 0 4px 12px rgba(0,0,0,0.3);
+  }
+}
+
+body {
+  font-family: var(--sans);
+  background: transparent;
+  color: var(--text);
+  padding: 0;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ── Card ── */
+.widget {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  box-shadow: var(--shadow);
+}
+
+/* ── Header ── */
+.widget-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 18px;
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border);
+}
+.widget-header-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.widget-icon {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  background: var(--risk-high-bg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+}
+.widget-title {
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  color: var(--text-secondary);
+}
+
+/* ── Score ── */
+.score-wrap {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.score-num {
+  font-family: var(--mono);
+  font-size: 26px;
+  font-weight: 800;
+  line-height: 1;
+}
+.score-badge {
+  font-size: 11px;
+  font-weight: 700;
+  padding: 3px 10px;
+  border-radius: 20px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.badge-high   { background: var(--risk-high-bg);   color: var(--risk-high); }
+.badge-medium { background: var(--risk-medium-bg); color: var(--risk-medium); }
+.badge-low    { background: var(--risk-low-bg);    color: var(--risk-low); }
+
+/* ── Score bar ── */
+.score-bar-wrap { padding: 14px 18px 0; }
+.bar-labels { display: flex; justify-content: space-between; margin-bottom: 4px; }
+.bar-label  { font-size: 10px; color: var(--text-muted); }
+.bar-track  { height: 6px; background: var(--border); border-radius: 999px; overflow: hidden; }
+.bar-fill   { height: 100%; border-radius: 999px; transition: width 0.7s cubic-bezier(.4,0,.2,1); }
+.fill-high   { background: linear-gradient(90deg, #f97316, #dc2626); }
+.fill-medium { background: linear-gradient(90deg, #fbbf24, #d97706); }
+.fill-low    { background: linear-gradient(90deg, #34d399, #059669); }
+
+/* ── Body ── */
+.widget-body { padding: 16px 18px; }
+
+/* ── Flags ── */
+.flags-label {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  color: var(--text-muted);
+  margin-bottom: 8px;
+}
+.flags-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 16px;
+}
+.flag-chip {
+  font-size: 11px;
+  font-weight: 500;
+  padding: 4px 10px;
+  border-radius: 20px;
+  background: var(--risk-high-bg);
+  color: var(--risk-high);
+  border: 1px solid rgba(220,38,38,0.15);
+}
+.flag-chip.warn {
+  background: var(--risk-medium-bg);
+  color: var(--risk-medium);
+  border-color: rgba(217,119,6,0.15);
+}
+.no-flags {
+  font-size: 12px;
+  color: var(--text-muted);
+  font-style: italic;
+  margin-bottom: 16px;
+}
+
+/* ── Meta grid ── */
+.meta-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  padding: 14px;
+  background: var(--bg-secondary);
+  border-radius: 8px;
+  margin-bottom: 14px;
+}
+.meta-cell { display: flex; flex-direction: column; gap: 2px; }
+.meta-key  { font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.8px; color: var(--text-muted); }
+.meta-val  { font-size: 13px; font-weight: 600; color: var(--text); }
+
+/* ── Actions ── */
+.widget-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.w-btn {
+  flex: 1;
+  min-width: 110px;
+  padding: 9px 14px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  font-family: var(--sans);
+  cursor: pointer;
+  border: 1px solid var(--border);
+  background: var(--bg-secondary);
+  color: var(--text);
+  transition: all 0.18s;
+  text-align: center;
+}
+.w-btn:hover { filter: brightness(0.96); }
+.w-btn.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+.w-btn.danger  { background: var(--risk-high-bg); color: var(--risk-high); border-color: rgba(220,38,38,0.25); }
+
+/* ── States ── */
+.state-wrap { padding: 32px 18px; text-align: center; color: var(--text-muted); font-size: 13px; }
+.state-icon { font-size: 32px; margin-bottom: 8px; }
+.state-link { margin-top: 8px; }
+.state-link a { color: var(--accent); font-size: 12px; text-decoration: none; }
+
+/* ── Toast ── */
+.toast {
+  position: fixed;
+  bottom: 16px; right: 16px;
+  background: var(--text);
+  color: var(--bg);
+  padding: 10px 18px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 500;
+  opacity: 0;
+  transform: translateY(8px);
+  transition: all 0.25s;
+  pointer-events: none;
+  z-index: 9999;
+}
+.toast.show { opacity: 1; transform: translateY(0); }
+</style>
+</head>
+<body>
+
+<div id="widget-root"></div>
+<div class="toast" id="toast"></div>
+
+<script>
+const DUID = '{{ duid }}';
+const API_BASE = '';  // same origin
+
+function showToast(msg, duration = 2500) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), duration);
+}
+
+function riskClass(score) {
+  return score >= 50 ? 'high' : score >= 25 ? 'medium' : 'low';
+}
+
+function riskLabel(score) {
+  return score >= 50 ? 'High Risk' : score >= 25 ? 'Medium Risk' : 'Low Risk';
+}
+
+function fmtDate(str) {
+  if (!str) return '—';
+  return new Date(str).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+}
+
+async function recordOutcome(outcome) {
+  const labels = {
+    confirmed_fraud: 'Confirmed as Fraud',
+    false_positive:  'Marked as False Positive',
+    review_needed:   'Flagged for Review'
+  };
+  try {
+    const r = await fetch(`${API_BASE}/api/outcomes`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ duid: DUID, outcome })
+    });
+    const d = await r.json();
+    if (d.error) throw new Error(d.error);
+    showToast(`✓ ${labels[outcome] || outcome}`);
+    // Notify parent window (for platform iframe embedding)
+    window.parent?.postMessage({ type: 'fraud_outcome', duid: DUID, outcome }, '*');
+  } catch (e) {
+    showToast('Error: ' + e.message);
+  }
+}
+
+function openFullDashboard() {
+  const url = `${API_BASE}/?tab=overview`;
+  window.parent?.postMessage({ type: 'open_fraud_dashboard', duid: DUID }, '*');
+  window.open(url, '_blank');
+}
+
+async function render() {
+  const root = document.getElementById('widget-root');
+
+  try {
+    const r = await fetch(`${API_BASE}/api/account/${DUID}`);
+    const data = await r.json();
+
+    if (data.error || !data.duid) {
+      root.innerHTML = `
+        <div class="widget">
+          <div class="widget-header">
+            <div class="widget-header-left">
+              <div class="widget-icon">🛡</div>
+              <span class="widget-title">Fraud Risk</span>
+            </div>
+          </div>
+          <div class="state-wrap">
+            <div class="state-icon">◎</div>
+            This account hasn't been analyzed yet.
+            <div class="state-link"><a href="${API_BASE}/embed?tab=actions" target="_blank">Run Analysis →</a></div>
+          </div>
+        </div>`;
+      return;
+    }
+
+    const score  = data.risk_score || 0;
+    const level  = riskClass(score);
+    const flags  = data.flags ? data.flags.split('|').filter(Boolean) : [];
+
+    const warnFlags = ['POV_TIMING', 'AFFILIATE_DOMAIN_CONCENTRATION', 'DEVICE_MISMATCH'];
+
+    root.innerHTML = `
+      <div class="widget">
+        <!-- Header -->
+        <div class="widget-header">
+          <div class="widget-header-left">
+            <div class="widget-icon">🛡</div>
+            <span class="widget-title">Fraud Risk</span>
+          </div>
+          <div class="score-wrap">
+            <span class="score-num" style="color:var(--risk-${level})">${score}</span>
+            <span class="score-badge badge-${level}">${riskLabel(score)}</span>
+          </div>
+        </div>
+
+        <!-- Score bar -->
+        <div class="score-bar-wrap">
+          <div class="bar-labels">
+            <span class="bar-label">0</span>
+            <span class="bar-label">25</span>
+            <span class="bar-label">50</span>
+            <span class="bar-label">100</span>
+          </div>
+          <div class="bar-track">
+            <div class="bar-fill fill-${level}" style="width:${score}%"></div>
+          </div>
+        </div>
+
+        <!-- Body -->
+        <div class="widget-body">
+
+          <!-- Flags -->
+          ${flags.length ? `
+            <p class="flags-label">Flags Detected (${flags.length})</p>
+            <div class="flags-list">
+              ${flags.slice(0, 6).map(f => {
+                const isWarn = warnFlags.some(w => f.includes(w));
+                return `<span class="flag-chip${isWarn ? ' warn' : ''}">${f.replace(/_/g, ' ')}</span>`;
+              }).join('')}
+              ${flags.length > 6 ? `<span class="flag-chip">+${flags.length - 6} more</span>` : ''}
+            </div>
+          ` : `<p class="no-flags">No fraud flags detected.</p>`}
+
+          <!-- Meta -->
+          <div class="meta-grid">
+            <div class="meta-cell">
+              <span class="meta-key">DUID</span>
+              <span class="meta-val">${data.duid}</span>
+            </div>
+            <div class="meta-cell">
+              <span class="meta-key">Analyzed</span>
+              <span class="meta-val">${fmtDate(data.analyzed_at)}</span>
+            </div>
+            <div class="meta-cell">
+              <span class="meta-key">Affiliate</span>
+              <span class="meta-val">${data.webmaster_code || '—'}</span>
+            </div>
+            <div class="meta-cell">
+              <span class="meta-key">Payout</span>
+              <span class="meta-val">${data.payout_amount ? '$' + Number(data.payout_amount).toFixed(2) : '—'}</span>
+            </div>
+          </div>
+
+          <!-- Actions -->
+          <div class="widget-actions">
+            <button class="w-btn primary" onclick="openFullDashboard()">Full Report</button>
+            <button class="w-btn" onclick="recordOutcome('false_positive')">False Positive</button>
+            <button class="w-btn danger" onclick="recordOutcome('confirmed_fraud')">Confirm Fraud</button>
+          </div>
+
+        </div>
+      </div>`;
+
+  } catch (err) {
+    root.innerHTML = `
+      <div class="widget">
+        <div class="state-wrap">
+          <div class="state-icon">⚠️</div>
+          Failed to load fraud data.
+        </div>
+      </div>`;
+    console.error(err);
+  }
+}
+
+render();
+</script>
+</body>
+</html>

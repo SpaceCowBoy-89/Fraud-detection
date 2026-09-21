@@ -1,0 +1,260 @@
+{
+  "scoring_methodology": {
+    "summary": "Each account receives a risk_score from 0–100. Points from multiple flags add together. The total is capped at 100. Risk bands: Low 0–24, Medium 25–49, High 50+ (thresholds configurable in config.json).",
+    "order_of_operations": [
+      "Per-account email, device, IP velocity, and geo-cluster rules run on each lead/registration row.",
+      "Affiliate batch rules (sequential email, woman concentration, domain concentration) run on the same dataset and flag only matching accounts.",
+      "Admin enrichment adds payment, GeoIP, email-validation timing, and content-review flags for enriched (typically paid) accounts.",
+      "Post-enrichment batch rules (e.g. Discover concentration per affiliate) apply after enrichment completes."
+    ],
+    "not_scored": [
+      "Raw registration IP ≠ login IP (users switch Wi‑Fi/mobile) — only geo-based mismatches are scored.",
+      "Apple Private Relay and phone-registration placeholder domains skip local-part email pattern rules."
+    ]
+  },
+  "extensions": {
+    "EXCESSIVE_DOTS": {
+      "trigger": "More than 3 period characters in the email local part (before @).",
+      "explanation": "Fraud farms often insert extra dots in Gmail-style addresses to create many unique-looking emails from one inbox or to evade naive duplicate checks. Legitimate users rarely use more than three dots in a username.",
+      "investigation": "Compare with affiliate source and other email pattern flags. Multiple structure flags on one account increases confidence of templated signup.",
+      "score_tiers": [{ "condition": "Always when rule matches", "config_key": "excessive_dots", "default_points": 20 }]
+    },
+    "DIGIT_SUFFIX": {
+      "trigger": "Local part ends with exactly 4 or 5 consecutive digits.",
+      "explanation": "Bulk-generated accounts frequently append numeric suffixes to reuse a name stem across thousands of registrations.",
+      "investigation": "Look for SEQUENTIAL_EMAIL or NAME_NUMBER_PATTERN on the same affiliate; check IP velocity and shared IP.",
+      "score_tiers": [{ "condition": "Always when rule matches", "config_key": "digit_suffix", "default_points": 15 }]
+    },
+    "SCRAMBLED_PATTERN": {
+      "trigger": "Heuristic detects low vowel ratio and random-looking consonant clusters in the local part.",
+      "explanation": "Automatically generated strings often lack natural language letter patterns. This catches machine-created inboxes that are not obviously name-based.",
+      "investigation": "High value combined with fast email validation or POV timing. Review profile images via CONTENT_REVIEW when present.",
+      "score_tiers": [{ "condition": "Always when rule matches", "config_key": "scrambled_pattern", "default_points": 35 }]
+    },
+    "NAME_NUMBER_PATTERN": {
+      "trigger": "Local part matches firstname+number+lastname+number style templates.",
+      "explanation": "One of the highest-yield automated rules: fraud operations use predictable name-and-number email templates across campaigns.",
+      "investigation": "Prioritize for manual review; often appears in clusters from the same affiliate. Pair with sequential email detection.",
+      "score_tiers": [{ "condition": "Always when rule matches", "config_key": "name_number_pattern", "default_points": 40 }]
+    },
+    "WRITTEN_NUMBER_PATTERN": {
+      "trigger": "Local part contains English written numbers (e.g. one, two, three).",
+      "explanation": "Some generators embed spelled-out numbers to vary addresses while keeping a scriptable pattern.",
+      "investigation": "Usually secondary signal; escalate when combined with other email flags.",
+      "score_tiers": [{ "condition": "Always when rule matches", "config_key": "written_number_pattern", "default_points": 15 }]
+    },
+    "REPEATED_WORD_PATTERN": {
+      "trigger": "A word from the local part appears in more than 3 emails in the current analysis batch (config: repeated_word_threshold).",
+      "explanation": "Batch-level frequency detection finds shared tokens across many signups in the same run—common when a script reuses vocabulary.",
+      "investigation": "Inspect the repeated word in details; drill into affiliate and time window for the batch.",
+      "score_tiers": [{ "condition": "Word frequency > threshold in batch", "config_key": "repeated_word_pattern", "default_points": 25 }]
+    },
+    "SUSPICIOUS_NAME": {
+      "trigger": "Local part contains a name from the configured suspicious_names list (default includes fatima, muhammed).",
+      "explanation": "Names that recur disproportionately in confirmed fraud are flagged for review. List is editable in config.",
+      "investigation": "Validate against recent confirmed fraud outcomes; propose list updates monthly.",
+      "score_tiers": [{ "condition": "Always when rule matches", "config_key": "suspicious_name", "default_points": 30 }]
+    },
+    "GENDER_NAME_MISMATCH": {
+      "trigger": "Gender inferred from email/name (gender-guesser) conflicts with declared gender (user1/custom_u1), high-confidence only.",
+      "explanation": "Declares one gender but uses an email local part strongly associated with another—common in misrepresented or scripted profiles.",
+      "investigation": "Androgynous or unknown names are skipped. Confirm declared gender and billing name on paid accounts.",
+      "score_tiers": [{ "condition": "High-confidence mismatch", "config_key": "gender_name_mismatch", "default_points": 35 }]
+    },
+    "BILLING_GENDER_MISMATCH": {
+      "trigger": "Paid records: billing first name gender ≠ declared gender (high-confidence only).",
+      "explanation": "Payment name inconsistent with profile gender is a strong paid-fraud indicator—often chargeback or stolen-card scenarios.",
+      "investigation": "Cross-check shared_card flags and card type. Confirm with processor billing data.",
+      "score_tiers": [{ "condition": "Paid data with high-confidence mismatch", "config_key": "billing_gender_mismatch", "default_points": 35 }]
+    },
+    "theme_cluster": {
+      "trigger": "Local part contains keywords for real estate, construction, crypto, or finance themes.",
+      "explanation": "Theme clustering groups niche keyword spam that appears in coordinated fraud waves (investment/crypto scams, etc.). Stored flag: THEME_CLUSTER_<THEME>.",
+      "investigation": "Review campaign and affiliate; themes often spike together in time.",
+      "score_tiers": [{ "condition": "Per matching theme", "config_key": "theme_cluster", "default_points": 15 }]
+    },
+    "POV_INSTANT_VALIDATION_20S": {
+      "trigger": "CSV POV fields: email verified within 20 seconds of signup.",
+      "explanation": "Human users rarely complete verification instantly; sub-20s timing suggests automation or pre-validated inboxes.",
+      "investigation": "Treat as critical if Admin email_validated timing confirms. Highest priority queue.",
+      "score_tiers": [{ "condition": "POV ≤ 20s", "config_key": "pov_instant_20s", "default_points": 50 }]
+    },
+    "POV_INSTANT_VALIDATION_40S": {
+      "trigger": "CSV POV: verified within 21–40 seconds.",
+      "explanation": "Still abnormally fast for organic signup; slightly lower weight than 20s tier.",
+      "investigation": "Compare with Admin validation timestamps when available.",
+      "score_tiers": [{ "condition": "POV ≤ 40s", "config_key": "pov_instant_40s", "default_points": 40 }]
+    },
+    "POV_FAST_VALIDATION_60S": {
+      "trigger": "CSV POV: verified within 41–60 seconds.",
+      "explanation": "Fast validation band; meaningful when combined with other fraud signals.",
+      "investigation": "Use as supporting signal unless affiliate shows widespread fast POV.",
+      "score_tiers": [{ "condition": "POV ≤ 60s", "config_key": "pov_fast_60s", "default_points": 30 }]
+    },
+    "email_validated": {
+      "trigger": "Admin API: seconds from account creation to email validation ≤ 60 or ≤ 120.",
+      "explanation": "Strongest automated signal when platform timestamps are available—mirrors manual POV analysis at scale.",
+      "investigation": "Prioritize ≤60s accounts for affiliate termination discussions. Flag stored as email_validated_{N}s(+points).",
+      "score_tiers": [
+        { "condition": "Validation ≤ 60s after registration", "config_key": "email_validated_60s", "default_points": 50 },
+        { "condition": "Validation 61–120s", "config_key": "email_validated_120s", "default_points": 30 }
+      ]
+    },
+    "SEQUENTIAL_EMAIL": {
+      "trigger": "Same affiliate: same letter stem (≥4 chars) + same domain, with 4+ distinct numeric suffixes on local part.",
+      "explanation": "Detects factory-style email generation (e.g. maucheesee71@, maucheesee76@) without requiring consecutive numbers.",
+      "investigation": "Affiliate-level abuse indicator—review entire affiliate cohort sharing the stem.",
+      "score_tiers": [{ "condition": "Account in detected cluster", "config_key": "sequential_email", "default_points": 30 }]
+    },
+    "WOMAN_CONCENTRATION": {
+      "trigger": "Affiliate WOMAN share ≥ ~15% (configurable in build_gender_concentration_map) with sufficient sample; baseline ~0.9%.",
+      "explanation": "Flags only WOMAN registrations from affiliates with abnormal gender mix—often mislabeled or scripted female profiles.",
+      "investigation": "Affiliate quality conversation; compare to campaign and geo. Only flagged gender rows receive points.",
+      "score_tiers": [{ "condition": "WOMAN account from concentrated affiliate", "config_key": "woman_concentration", "default_points": 25 }]
+    },
+    "AFFILIATE_DOMAIN_CONCENTRATION": {
+      "trigger": "Affiliate has ≥20 emails in batch; non-excluded domain (default: not gmail.com) is ≥5% of that affiliate's domains.",
+      "explanation": "Fraud sources funnel traffic through disposable or niche domains. Gmail is excluded by default because it dominates legitimate traffic.",
+      "investigation": "Inspect domain WHOIS/reputation; only accounts on the concentrated domain are flagged—not all affiliate traffic.",
+      "score_tiers": [{ "condition": "Email domain matches concentrated pair (affiliate, domain)", "config_key": "affiliate_domain_concentration", "default_points": 20 }]
+    },
+    "IP_VELOCITY_HIGH": {
+      "trigger": "Registration IP has 10+ signups within one hour in the analysis batch (config: ip_velocity_threshold).",
+      "explanation": "Classic fraud-ring signal—single IP driving volume in a short window.",
+      "investigation": "Check SHARED_IP flags and datacenter/VPN ASN. Consider IP block at affiliate level.",
+      "score_tiers": [{ "condition": "10+ signups/hour on IP", "config_key": "ip_velocity_high", "default_points": 30 }]
+    },
+    "IP_VELOCITY_MEDIUM": {
+      "trigger": "Registration IP has 5–9 signups within one hour in batch.",
+      "explanation": "Elevated velocity; weaker alone but useful in combination.",
+      "investigation": "Trend IP over multiple days if data available.",
+      "score_tiers": [{ "condition": "5+ signups/hour on IP", "config_key": "ip_velocity_medium", "default_points": 5 }]
+    },
+    "SHARED_IP_HIGH": {
+      "trigger": "Same registration IP appears on 10+ accounts in the batch.",
+      "explanation": "Shared infrastructure—café, VPN, or fraud farm.",
+      "investigation": "Distinguish datacenter vs residential via enrichment flags.",
+      "score_tiers": [{ "condition": "10+ accounts share IP", "config_key": "shared_ip_high", "default_points": 35 }]
+    },
+    "SHARED_IP_MEDIUM": {
+      "trigger": "Same registration IP on 3–9 accounts in batch.",
+      "explanation": "Moderate sharing; may be legitimate NAT but worth review on high-payout affiliates.",
+      "investigation": "Correlate with email patterns.",
+      "score_tiers": [{ "condition": "3–9 accounts share IP", "config_key": "shared_ip_medium", "default_points": 20 }]
+    },
+    "DESKTOP_DEVICE_SUSPICIOUS": {
+      "trigger": "Signup user-agent indicates desktop; Windows 10 vs other desktop OS tiers.",
+      "explanation": "Fraud farms often use Windows 10 desktops at scale; other desktops scored lower.",
+      "investigation": "Combine with IP and email signals—desktop alone is weak.",
+      "score_tiers": [
+        { "condition": "Windows 10 desktop", "config_key": "desktop_windows_10", "default_points": 20 },
+        { "condition": "Other desktop OS", "config_key": "desktop_other", "default_points": 10 }
+      ]
+    },
+    "SAME_US_STATE_CLUSTER": {
+      "trigger": "3+ accounts in batch share the same US state (geo from data).",
+      "explanation": "Geographic clustering can indicate targeted fraud or proxy concentration.",
+      "investigation": "Compare to affiliate's expected geo; check city-level cluster flag.",
+      "score_tiers": [{ "condition": "3+ accounts same US state", "config_key": "us_state_cluster", "default_points": 25 }]
+    },
+    "SAME_US_CITY_STATE_CLUSTER": {
+      "trigger": "3+ accounts share same US city and state.",
+      "explanation": "Tighter cluster than state-only—higher confidence of coordinated signups.",
+      "investigation": "Map to IP clusters and registration times.",
+      "score_tiers": [{ "condition": "3+ accounts same US city+state", "config_key": "us_city_state_cluster", "default_points": 30 }]
+    },
+    "SAME_INTL_COUNTRY_CITY_CLUSTER": {
+      "trigger": "3+ accounts share same non-US city.",
+      "explanation": "International city clustering—common in outsourced fraud operations.",
+      "investigation": "Check login_high_risk_country and geo_login_mismatch.",
+      "score_tiers": [{ "condition": "3+ accounts same intl city", "config_key": "intl_country_city_cluster", "default_points": 30 }]
+    },
+    "ip_country_mismatch": {
+      "trigger": "GeoIP country of registration IP ≠ GeoIP country of login IP.",
+      "explanation": "Cross-country movement between signup and login is suspicious on dating products when paired with other signals. Different from raw IP string mismatch.",
+      "investigation": "Confirm countries in flag text. High-risk login country adds separate points.",
+      "score_tiers": [{ "condition": "Reg country ≠ login country", "config_key": "ip_different_country", "default_points": 35 }]
+    },
+    "ip_state_mismatch": {
+      "trigger": "Same country but US state (or region) differs between registration and login IP.",
+      "explanation": "Cross-state moves happen legitimately but add risk when combined with automation signals.",
+      "investigation": "Not scored for different cities within same state.",
+      "score_tiers": [{ "condition": "Same country, different state", "config_key": "ip_different_state", "default_points": 15 }]
+    },
+    "login_high_risk_country": {
+      "trigger": "Login IP country in config high_risk_countries (default: NG, GH, CI, CM, PH, RO, MD, ID).",
+      "explanation": "Login from geographies over-represented in dating fraud ops.",
+      "investigation": "Validate against declared geo in CSV; list is configurable.",
+      "score_tiers": [{ "condition": "Login country in list", "config_key": "login_high_risk_country", "default_points": 30 }]
+    },
+    "geo_login_mismatch": {
+      "trigger": "Login IP country ≠ geo_country from affiliate/leads CSV.",
+      "explanation": "Cross-source inconsistency—lead data says one country, login IP another.",
+      "investigation": "Data quality vs fraud—check if CSV geo is stale or VPN-related.",
+      "score_tiers": [{ "condition": "Login country ≠ CSV geo_country", "config_key": "geo_login_country_mismatch", "default_points": 25 }]
+    },
+    "registration_ip_datacenter": {
+      "trigger": "Registration IP ASN classified as datacenter/cloud (AWS, GCP, Azure, etc.).",
+      "explanation": "Consumer dating signups rarely originate from cloud host IPs.",
+      "investigation": "ASN name appears in flag. Pair with email automation flags.",
+      "score_tiers": [{ "condition": "Registration IP datacenter", "config_key": "registration_ip_datacenter", "default_points": 25 }]
+    },
+    "login_ip_datacenter": {
+      "trigger": "Login IP ASN is datacenter/cloud.",
+      "explanation": "Bots and scripted logins often use hosted infrastructure.",
+      "investigation": "Compare to registration IP type.",
+      "score_tiers": [{ "condition": "Login IP datacenter", "config_key": "login_ip_datacenter", "default_points": 25 }]
+    },
+    "registration_ip_vpn": {
+      "trigger": "Registration IP ASN matches known VPN/proxy providers.",
+      "explanation": "Anonymized registration path—elevated risk on affiliate traffic.",
+      "investigation": "VPN at registration + fast validation is high priority.",
+      "score_tiers": [{ "condition": "Registration IP VPN/proxy ASN", "config_key": "registration_ip_vpn", "default_points": 20 }]
+    },
+    "login_ip_vpn": {
+      "trigger": "Login IP on VPN/proxy ASN.",
+      "explanation": "Common for fraud operators masking location.",
+      "investigation": "Compare with geo_login_mismatch.",
+      "score_tiers": [{ "condition": "Login IP VPN/proxy ASN", "config_key": "login_ip_vpn", "default_points": 20 }]
+    },
+    "shared_card": {
+      "trigger": "Confirmed shared card (Used By, not fuzzy match) links account to 3+ or 5+ other DUIDs; major issuers excluded.",
+      "explanation": "Same payment credential across many accounts indicates fraud ring or stolen card testing.",
+      "investigation": "Use Admin shared cards view; 5+ is ring-level priority. QA cards/DUIDs can be whitelisted in config.",
+      "score_tiers": [
+        { "condition": "3–4 other accounts on same card", "config_key": "shared_card_3plus", "default_points": 35 },
+        { "condition": "5+ other accounts", "config_key": "shared_card_5plus", "default_points": 50 }
+      ]
+    },
+    "amex_card": {
+      "trigger": "Any Amex cardType on account payment methods.",
+      "explanation": "Amex has near-zero baseline on typical dating traffic—any appearance is anomalous.",
+      "investigation": "Verify charge outcomes; check billing gender mismatch.",
+      "score_tiers": [{ "condition": "Amex present", "config_key": "amex_card", "default_points": 30 }]
+    },
+    "business_card": {
+      "trigger": "cardDescription contains business/corporate/commercial/company/enterprise keywords.",
+      "explanation": "Business cards are inherently unusual for consumer dating purchases.",
+      "investigation": "Confirm description text in Admin; no issuer exclusions.",
+      "score_tiers": [{ "condition": "Business card description", "config_key": "business_card", "default_points": 40 }]
+    },
+    "discover_concentration": {
+      "trigger": "Post-enrichment: affiliate has >10% Discover cards among enriched accounts (default), minimum 10 enriched accounts.",
+      "explanation": "Discover baseline ~2% site-wide; affiliate-level spikes suggest bad traffic mix.",
+      "investigation": "Only Discover-card accounts flagged. Affiliate negotiation / cap traffic.",
+      "score_tiers": [{ "condition": "Discover account from hot affiliate", "config_key": "discover_concentration", "default_points": 20 }]
+    },
+    "CONTENT_REVIEW": {
+      "trigger": "Profile image uploaded AND (upload <180s after registration OR suspicious email/identity flags).",
+      "explanation": "Queues accounts for manual image review (stock, stolen, AI faces)—not always a score driver (default 0 points).",
+      "investigation": "Reverse image search; compare upload timing. Does not replace email/card investigation.",
+      "score_tiers": [{ "condition": "Review queue match", "config_key": "content_review", "default_points": 0 }]
+    },
+    "DATA_QUALITY_MISSING_EMAIL": {
+      "trigger": "Email field empty or missing on input row.",
+      "explanation": "Row skipped for pattern analysis; indicates export or pipeline data gap.",
+      "investigation": "Fix upstream data—not a fraud finding.",
+      "score_tiers": [{ "condition": "No email", "config_key": null, "default_points": 0 }]
+    }
+  }
+}

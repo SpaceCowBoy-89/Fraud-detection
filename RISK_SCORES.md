@@ -23,7 +23,7 @@ This document lists all fraud detection flags and their associated risk scores.
 | `WRITTEN_NUMBER_PATTERN` | 15 | Contains written numbers (one, two, three, etc.) |
 | `REPEATED_WORD_PATTERN` | 25 | Contains words that appear in 4+ emails in dataset |
 | `SUSPICIOUS_NAME` | 30 | Contains known fraud-associated names |
-| `DOMAIN_CONCENTRATION` | 20 | High concentration (>90%) from same non-major domain |
+| `AFFILIATE_DOMAIN_CONCENTRATION` | 20 | Non-gmail email domain ≥5% of an affiliate's registrations |
 | `THEME_CLUSTER_*` | 15 | Email matches theme cluster (real_estate, construction, crypto, finance) |
 
 ---
@@ -82,7 +82,7 @@ All risk scores are now **config-driven**. Edit `config.json` to adjust:
     "written_number_pattern": 15,
     "repeated_word_pattern": 25,
     "suspicious_name": 30,
-    "domain_concentration": 20,
+    "affiliate_domain_concentration": 20,
     "pov_instant_20s": 50,
     "pov_instant_40s": 40,
     "pov_fast_60s": 30,

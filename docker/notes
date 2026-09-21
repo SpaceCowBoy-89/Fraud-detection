@@ -1,0 +1,83 @@
+# DO docker image registry for GP:
+# registry.digitalocean.com/gpdocker
+
+# Image name: fraud-detection
+# Build context: repository root (Dockerfile at ../Dockerfile from this file)
+
+# list docker images
+$ docker image list
+
+# build (from repo root)
+$ cd /path/to/fraud-detection
+$ docker build -t fraud-detection:latest .
+
+# or via compose (tags both web + scheduler services)
+$ docker compose build
+
+# or build without cache
+$ docker build --no-cache --pull -t fraud-detection:1.0.0 .
+
+# Login to DigitalOcean registry (use registered email + DO API token as password)
+$ docker login registry.digitalocean.com
+#  Username: <registered-email>
+#  Password: <paste-api-token>
+
+# tag image for DO registry
+$ docker tag fraud-detection:latest registry.digitalocean.com/gpdocker/fraud-detection:latest
+
+# push to DO registry
+$ docker push registry.digitalocean.com/gpdocker/fraud-detection:latest
+# versioned tag (optional)
+$ docker push registry.digitalocean.com/gpdocker/fraud-detection:1.0.0
+
+
+# --- servers / Portainer ---
+
+$ docker login registry.digitalocean.com
+
+$ docker pull registry.digitalocean.com/gpdocker/fraud-detection:latest
+
+# optional local short name
+$ docker tag registry.digitalocean.com/gpdocker/fraud-detection:latest fraud-detection:latest
+
+
+# --- run (production: use compose stack, not single container) ---
+
+# Two services share one image + one SQLite volume:
+#   web        — gunicorn on port 5050 (dashboard + API)
+#   scheduler  — python scheduler.py (fetch / analyze pipeline)
+
+$ docker compose up -d
+
+# Env secrets (stack / Portainer — not baked into image):
+#   FLASK_SECRET_KEY              (required — admin2 session encryption)
+#   FRAUD_DETECTION_API_KEY       (affiliate export API)
+#   WEBHOOK_INGEST_TOKEN          (optional inbound webhook)
+#   ADMIN_API_USERNAME/PASSWORD   (scheduler enrichment only)
+#   ADMIN2_LOGIN_REQUIRED=1       (default — admin2 login gates dashboard)
+
+# See repo .env.example and docs/OPERATIONS.md
+
+# health (no auth)
+$ curl -s http://localhost:5050/api/health/live
+$ curl -s http://localhost:5050/api/health/ready
+
+
+# --- update cycle ---
+
+# Step 1: Build
+$ docker compose build
+# or: docker build -t fraud-detection:latest .
+
+# Step 2: Tag
+$ docker tag fraud-detection:latest registry.digitalocean.com/gpdocker/fraud-detection:latest
+
+# Step 3: Login
+$ docker login registry.digitalocean.com
+
+# Step 4: Push
+$ docker push registry.digitalocean.com/gpdocker/fraud-detection:latest
+
+# Step 5: On deploy host — pull and recreate stack (Portainer: Update stack / Repull)
+$ docker compose pull
+$ docker compose up -d

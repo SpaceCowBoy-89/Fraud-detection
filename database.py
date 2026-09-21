@@ -1,17 +1,24 @@
 """Database management for fraud detection system"""
+import json
 import sqlite3
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 import logging
 from contextlib import contextmanager
+from typing import Optional
 
 logger = logging.getLogger(__name__)
 
 
 class Database:
     # Valid table names (whitelist for SQL safety)
-    VALID_TABLES = {'free', 'paid', 'fraud_results', 'fetch_history', 'session_results', 
-                    'fraud_outcomes', 'detection_metrics', 'low_risk_samples'}
+    VALID_TABLES = {'free', 'paid', 'fraud_results', 'fetch_history',
+                    'fraud_outcomes', 'detection_metrics', 'low_risk_samples',
+                    'ml_models'}
+
+    # Inclusive calendar-day filter on stored transaction timestamp (SQLite).
+    # Matches API "trans_date" semantics; avoids raw string BETWEEN on datetimes.
+    SQL_TRANS_DATE_BETWEEN = "date(trans_datetime) BETWEEN date(?) AND date(?)"
     
     def __init__(self, db_path='affiliate_data.db'):
         self.db_path = db_path
@@ -71,6 +78,8 @@ class Database:
             chargeback_count INTEGER,
             chargeback_amount REAL,
             ref_url TEXT,
+            webmaster_code TEXT,
+            webmaster_id TEXT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             analyzed BOOLEAN DEFAULT 0
         )''')
@@ -94,6 +103,8 @@ class Database:
             pov_verified BOOLEAN,
             pov_verified_time TIMESTAMP,
             ref_url TEXT,
+            webmaster_code TEXT,
+            webmaster_id TEXT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             analyzed BOOLEAN DEFAULT 0
         )''')
@@ -108,7 +119,30 @@ class Database:
             details TEXT,
             payout_amount REAL,
             data_type TEXT,
-            analyzed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            webmaster_code TEXT,
+            campaign TEXT,
+            ad_id TEXT,
+            trans_datetime TIMESTAMP,
+            ip_proxy BOOLEAN DEFAULT 0,
+            ip_hosting BOOLEAN DEFAULT 0,
+            pov_verified BOOLEAN,
+            pov_verified_time TIMESTAMP,
+            user_agent TEXT,
+            geo_country TEXT,
+            first_name TEXT,
+            custom_u1 TEXT,
+            ip TEXT,
+            analyzed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            admin_enriched BOOLEAN DEFAULT 0,
+            admin_enriched_at TIMESTAMP,
+            admin_enrichment_flags TEXT,
+            admin_risk_added INTEGER DEFAULT 0,
+            registration_timestamp TEXT,
+            registration_ip TEXT,
+            login_ip TEXT,
+            shared_card_count INTEGER DEFAULT 0,
+            profile_image_uploaded BOOLEAN,
+            profile_image_upload_seconds INTEGER
         )''')
 
         # Fetch history table
@@ -120,6 +154,25 @@ class Database:
             records_fetched INTEGER,
             fetched_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )''')
+
+        # MCP / PS7 source reconciliation (expected vs local fetch counts)
+        c.execute('''CREATE TABLE IF NOT EXISTS reconciliation_results (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            day TEXT NOT NULL,
+            source TEXT NOT NULL DEFAULT 'mcp_ps7_ht_signups',
+            record_type TEXT NOT NULL,
+            expected_count INTEGER,
+            local_count INTEGER,
+            match_pct REAL,
+            status TEXT NOT NULL,
+            details_json TEXT,
+            checked_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(day, source, record_type)
+        )''')
+        c.execute(
+            'CREATE INDEX IF NOT EXISTS idx_reconciliation_day '
+            'ON reconciliation_results (day, source)'
+        )
 
         # Fraud outcomes table - tracks confirmed fraud vs false positives
         c.execute('''CREATE TABLE IF NOT EXISTS fraud_outcomes (
@@ -138,6 +191,60 @@ class Database:
             actual_loss REAL DEFAULT 0,  -- actual financial loss if fraud confirmed
             recovery_amount REAL DEFAULT 0  -- amount recovered
         )''')
+
+        # Affiliate-level actions taken after fraud-tool review (close traffic, etc.)
+        c.execute('''CREATE TABLE IF NOT EXISTS affiliate_actions (
+            webmaster_code TEXT PRIMARY KEY NOT NULL,
+            action_status TEXT NOT NULL DEFAULT 'under_review',
+            action_type TEXT,
+            trigger_reason TEXT,
+            notes TEXT,
+            updated_by TEXT,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            actioned_at TIMESTAMP,
+            trigger_run_id TEXT
+        )''')
+
+        # Pipeline run history — supports scheduled automation and ML lineage
+        c.execute('''CREATE TABLE IF NOT EXISTS pipeline_runs (
+            id               INTEGER PRIMARY KEY AUTOINCREMENT,
+            run_id           TEXT UNIQUE NOT NULL,       -- short UUID
+            run_type         TEXT DEFAULT 'manual',      -- 'scheduled' | 'manual'
+            status           TEXT DEFAULT 'running',     -- 'running' | 'completed' | 'failed'
+            started_at       TIMESTAMP NOT NULL,
+            completed_at     TIMESTAMP,
+            duration_seconds REAL,
+            records_fetched  INTEGER DEFAULT 0,
+            records_analyzed INTEGER DEFAULT 0,
+            high_risk_found  INTEGER DEFAULT 0,
+            error_message    TEXT,
+            config_snapshot  TEXT,                       -- JSON of settings used (ML lineage)
+            date_range_start TEXT,
+            date_range_end   TEXT
+        )''')
+        c.execute('CREATE INDEX IF NOT EXISTS idx_pipeline_runs_started ON pipeline_runs (started_at)')
+
+        # Supervised ML model registry (logistic regression on reviewed outcomes)
+        c.execute('''CREATE TABLE IF NOT EXISTS ml_models (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            run_id TEXT UNIQUE NOT NULL,
+            model_type TEXT DEFAULT 'logistic_regression',
+            trained_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            labeled_samples INTEGER,
+            fraud_rate REAL,
+            test_roc_auc REAL,
+            cv_roc_auc_mean REAL,
+            cv_roc_auc_std REAL,
+            test_precision REAL,
+            test_recall REAL,
+            test_pr_auc REAL,
+            optimal_threshold REAL,
+            feature_names TEXT,
+            metrics_json TEXT,
+            artifact_path TEXT,
+            is_active INTEGER DEFAULT 1
+        )''')
+        c.execute('CREATE INDEX IF NOT EXISTS idx_ml_models_active ON ml_models (is_active, trained_at)')
 
         # Detection metrics table - tracks precision/recall over time
         c.execute('''CREATE TABLE IF NOT EXISTS detection_metrics (
@@ -169,6 +276,72 @@ class Database:
             reviewed_at TIMESTAMP
         )''')
 
+        # Business metrics cache table
+        c.execute('''CREATE TABLE IF NOT EXISTS business_metrics (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            metric_date DATE NOT NULL,
+            fraud_prevented_amount REAL DEFAULT 0,
+            fraud_prevented_count INTEGER DEFAULT 0,
+            total_at_risk REAL DEFAULT 0,
+            false_positive_count INTEGER DEFAULT 0,
+            false_positive_rate REAL DEFAULT 0,
+            total_flagged INTEGER DEFAULT 0,
+            overall_fraud_rate REAL DEFAULT 0,
+            protection_rate REAL DEFAULT 0,
+            net_value REAL DEFAULT 0,
+            calculated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(metric_date)
+        )''')
+
+        # Industry benchmarks table
+        c.execute('''CREATE TABLE IF NOT EXISTS industry_benchmarks (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            industry TEXT NOT NULL,  -- 'dating', 'ecommerce', etc.
+            metric_name TEXT NOT NULL,  -- 'fraud_rate', 'false_positive_rate', etc.
+            benchmark_value REAL,
+            percentile_25 REAL,
+            percentile_75 REAL,
+            source TEXT,
+            last_updated DATE,
+            UNIQUE(industry, metric_name)
+        )''')
+
+        # EDA cache table - ephemeral MD5-keyed cache (matches dashboard /api/eda/run)
+        c.execute('''CREATE TABLE IF NOT EXISTS eda_cache (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            cache_key TEXT NOT NULL UNIQUE,
+            result_json TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )''')
+        # Rebuild if DB was created with legacy columns (data_type, results_json, generated_at)
+        c.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='eda_cache'")
+        if c.fetchone():
+            c.execute("PRAGMA table_info(eda_cache)")
+            eda_cols = [row[1] for row in c.fetchall()]
+            if 'cache_key' not in eda_cols:
+                c.execute("DROP TABLE eda_cache")
+                c.execute('''CREATE TABLE eda_cache (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    cache_key TEXT NOT NULL UNIQUE,
+                    result_json TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )''')
+                logger.info("Rebuilt eda_cache for dashboard EDA cache compatibility")
+
+        # Webhook ingest audit log (Settings UI + ops)
+        c.execute('''CREATE TABLE IF NOT EXISTS webhook_ingest_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            free_inserted INTEGER DEFAULT 0,
+            free_duplicates INTEGER DEFAULT 0,
+            paid_inserted INTEGER DEFAULT 0,
+            paid_duplicates INTEGER DEFAULT 0,
+            errors INTEGER DEFAULT 0,
+            analyzed_count INTEGER DEFAULT 0,
+            message TEXT
+        )''')
+        c.execute('CREATE INDEX IF NOT EXISTS idx_webhook_ingest_created ON webhook_ingest_log (created_at)')
+
         # Create indexes for performance
         indexes = [
             'CREATE INDEX IF NOT EXISTS idx_paid_duid ON paid(duid)',
@@ -181,14 +354,201 @@ class Database:
             'CREATE INDEX IF NOT EXISTS idx_free_analyzed ON free(analyzed)',
             'CREATE INDEX IF NOT EXISTS idx_fraud_risk ON fraud_results(risk_score)',
             'CREATE INDEX IF NOT EXISTS idx_fraud_duid ON fraud_results(duid)',
+            'CREATE INDEX IF NOT EXISTS idx_fraud_ip ON fraud_results(ip)',
+            'CREATE INDEX IF NOT EXISTS idx_fraud_webmaster ON fraud_results(webmaster_code)',
+            'CREATE INDEX IF NOT EXISTS idx_fraud_campaign ON fraud_results(campaign)',
+            'CREATE INDEX IF NOT EXISTS idx_paid_trans_dt ON paid(trans_datetime)',
+            'CREATE INDEX IF NOT EXISTS idx_free_trans_dt ON free(trans_datetime)',
+            'CREATE INDEX IF NOT EXISTS idx_fraud_trans_dt ON fraud_results(trans_datetime)',
+            'CREATE INDEX IF NOT EXISTS idx_outcomes_reviewed ON fraud_outcomes(reviewed_at)',
+            'CREATE INDEX IF NOT EXISTS idx_affiliate_actions_status ON affiliate_actions(action_status)',
+            'CREATE INDEX IF NOT EXISTS idx_metrics_date ON detection_metrics(metric_date)',
         ]
 
         for index in indexes:
             c.execute(index)
 
+        # Migrate existing fraud_results tables that predate admin enrichment columns
+        self._migrate_admin_enrichment_columns(c)
+        self._migrate_ml_columns(c)
+        self._migrate_fetch_history_columns(c)
+
+        # Seed industry benchmarks (dating industry)
+        self._seed_industry_benchmarks(c)
+
         conn.commit()
         conn.close()
         logger.info(f"Database setup complete: {self.db_path}")
+    
+    def _migrate_admin_enrichment_columns(self, cursor):
+        """Add admin enrichment columns to fraud_results if they don't exist yet."""
+        cursor.execute("PRAGMA table_info(fraud_results)")
+        existing = {row[1] for row in cursor.fetchall()}
+        additions = [
+            ("admin_enriched",               "BOOLEAN DEFAULT 0"),
+            ("admin_enriched_at",            "TIMESTAMP"),
+            ("admin_enrichment_flags",       "TEXT"),
+            ("admin_risk_added",             "INTEGER DEFAULT 0"),
+            ("registration_timestamp",       "TEXT"),
+            ("registration_ip",              "TEXT"),
+            ("login_ip",                     "TEXT"),
+            ("shared_card_count",            "INTEGER DEFAULT 0"),
+            ("profile_image_uploaded",       "BOOLEAN"),
+            ("profile_image_upload_seconds", "INTEGER"),
+            ("card_types",                   "TEXT"),
+            ("is_business_card",             "BOOLEAN"),
+            ("registration_ip_country",      "TEXT"),
+            ("registration_ip_state",        "TEXT"),
+            ("login_ip_country",             "TEXT"),
+            ("login_ip_state",               "TEXT"),
+            ("registration_ip_asn",          "TEXT"),
+            ("login_ip_asn",                 "TEXT"),
+            ("registration_ip_is_datacenter","BOOLEAN"),
+            ("login_ip_is_datacenter",       "BOOLEAN"),
+            ("admin_enrich_attempts",         "INTEGER DEFAULT 0"),
+            ("admin_enrich_last_status",     "INTEGER"),
+            ("admin_enrich_last_error_at",   "TEXT"),
+        ]
+        for col, definition in additions:
+            if col not in existing:
+                try:
+                    cursor.execute(f"ALTER TABLE fraud_results ADD COLUMN {col} {definition}")
+                    logger.info(f"Migrated fraud_results: added column {col}")
+                except Exception as e:
+                    logger.warning(f"Could not add column {col}: {e}")
+
+    def _migrate_ml_columns(self, cursor):
+        """Add ML prediction columns to fraud_results if missing."""
+        cursor.execute("PRAGMA table_info(fraud_results)")
+        existing = {row[1] for row in cursor.fetchall()}
+        for col, definition in [
+            ("ml_fraud_probability", "REAL"),
+            ("ml_model_run_id", "TEXT"),
+        ]:
+            if col not in existing:
+                try:
+                    cursor.execute(f"ALTER TABLE fraud_results ADD COLUMN {col} {definition}")
+                    logger.info(f"Migrated fraud_results: added column {col}")
+                except Exception as e:
+                    logger.warning(f"Could not add column {col}: {e}")
+
+    def _migrate_fetch_history_columns(self, cursor):
+        """Add audit columns to fetch_history for coverage troubleshooting."""
+        cursor.execute("PRAGMA table_info(fetch_history)")
+        existing = {row[1] for row in cursor.fetchall()}
+        for col, definition in [
+            ("records_returned", "INTEGER"),
+            ("records_duplicates", "INTEGER"),
+            ("filters_json", "TEXT"),
+            ("http_status", "INTEGER"),
+            ("error_message", "TEXT"),
+        ]:
+            if col not in existing:
+                try:
+                    cursor.execute(f"ALTER TABLE fetch_history ADD COLUMN {col} {definition}")
+                    logger.info(f"Migrated fetch_history: added column {col}")
+                except Exception as e:
+                    logger.warning(f"Could not add fetch_history column {col}: {e}")
+
+    def save_ml_model(
+        self,
+        run_id,
+        labeled_samples,
+        fraud_rate,
+        test_roc_auc=None,
+        cv_roc_auc_mean=None,
+        cv_roc_auc_std=None,
+        test_precision=None,
+        test_recall=None,
+        test_pr_auc=None,
+        optimal_threshold=0.5,
+        feature_names=None,
+        metrics_json=None,
+        artifact_path=None,
+    ):
+        """Persist a trained model and mark it as the active model."""
+        feature_json = json.dumps(feature_names or [])
+        metrics_str = json.dumps(metrics_json) if isinstance(metrics_json, dict) else metrics_json
+        with self.get_connection() as conn:
+            conn.execute("UPDATE ml_models SET is_active = 0 WHERE is_active = 1")
+            conn.execute(
+                """INSERT INTO ml_models (
+                    run_id, labeled_samples, fraud_rate, test_roc_auc,
+                    cv_roc_auc_mean, cv_roc_auc_std, test_precision, test_recall,
+                    test_pr_auc, optimal_threshold, feature_names, metrics_json,
+                    artifact_path, is_active
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)""",
+                (
+                    run_id,
+                    labeled_samples,
+                    fraud_rate,
+                    test_roc_auc,
+                    cv_roc_auc_mean,
+                    cv_roc_auc_std,
+                    test_precision,
+                    test_recall,
+                    test_pr_auc,
+                    optimal_threshold,
+                    feature_json,
+                    metrics_str,
+                    artifact_path,
+                ),
+            )
+
+    def get_active_ml_model(self):
+        """Return metadata for the currently active ML model, or None."""
+        import json as json_lib
+
+        with self.get_connection() as conn:
+            conn.row_factory = sqlite3.Row
+            cur = conn.cursor()
+            cur.execute(
+                """SELECT * FROM ml_models
+                   WHERE is_active = 1
+                   ORDER BY trained_at DESC
+                   LIMIT 1"""
+            )
+            row = cur.fetchone()
+        if not row:
+            return None
+        d = dict(row)
+        try:
+            d["feature_names"] = json_lib.loads(d.get("feature_names") or "[]")
+        except Exception:
+            d["feature_names"] = []
+        try:
+            d["metrics"] = json_lib.loads(d.get("metrics_json") or "{}")
+        except Exception:
+            d["metrics"] = {}
+        return d
+
+    def update_ml_predictions(self, updates):
+        """Batch-update ml_fraud_probability and ml_model_run_id on fraud_results."""
+        if not updates:
+            return 0
+        with self.get_connection() as conn:
+            conn.executemany(
+                """UPDATE fraud_results
+                   SET ml_fraud_probability = ?, ml_model_run_id = ?
+                   WHERE duid = ?""",
+                updates,
+            )
+        return len(updates)
+
+    def _seed_industry_benchmarks(self, cursor):
+        """Seed initial industry benchmark data"""
+        benchmarks = [
+            ('dating', 'fraud_rate', 3.1, 2.5, 4.0, 'Dating Industry Reports 2024-2025', '2025-01-01'),
+            ('dating', 'false_positive_rate', 3.5, 2.0, 5.0, 'Dating Industry Reports 2024-2025', '2025-01-01'),
+            ('dating', 'detection_time_hours', 24.0, 12.0, 48.0, 'Dating Industry Reports 2024-2025', '2025-01-01'),
+        ]
+        
+        for industry, metric, value, p25, p75, source, updated in benchmarks:
+            cursor.execute('''
+                INSERT OR IGNORE INTO industry_benchmarks 
+                (industry, metric_name, benchmark_value, percentile_25, percentile_75, source, last_updated)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            ''', (industry, metric, value, p25, p75, source, updated))
 
     def _get_field(self, record, *field_names, default=None):
         """
@@ -397,41 +757,643 @@ class Database:
 
         return df
 
-    def mark_as_analyzed(self, duids, data_type):
-        """Mark records as analyzed"""
+    def get_records_by_duids(self, data_type, duids):
+        """Load free or paid rows for the given DUIDs (for webhook-triggered analysis)."""
+        import pandas as pd
+
         table = 'paid' if data_type == 'paid' else 'free'
         self._validate_table_name(table)
-        
+        if not duids:
+            return pd.DataFrame()
+        duids = [str(d) for d in duids]
         placeholders = ','.join('?' * len(duids))
+        query = f'SELECT * FROM {table} WHERE duid IN ({placeholders})'
+        with self.get_connection() as conn:
+            return pd.read_sql_query(query, conn, params=duids)
+
+    def log_webhook_ingest(
+        self,
+        free_inserted=0,
+        free_duplicates=0,
+        paid_inserted=0,
+        paid_duplicates=0,
+        errors=0,
+        analyzed_count=0,
+        message=None,
+    ):
+        """Append one webhook ingest summary row."""
+        with self.get_connection() as conn:
+            conn.execute(
+                '''INSERT INTO webhook_ingest_log (
+                    free_inserted, free_duplicates, paid_inserted, paid_duplicates,
+                    errors, analyzed_count, message
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)''',
+                (
+                    int(free_inserted),
+                    int(free_duplicates),
+                    int(paid_inserted),
+                    int(paid_duplicates),
+                    int(errors),
+                    int(analyzed_count),
+                    message,
+                ),
+            )
+
+    def get_recent_webhook_ingests(self, limit=20):
+        """Return recent webhook ingest log rows newest first."""
+        limit = max(1, min(int(limit), 100))
         with self.get_connection() as conn:
             c = conn.cursor()
-            c.execute(f"UPDATE {table} SET analyzed = 1 WHERE duid IN ({placeholders})", duids)
+            c.execute(
+                '''SELECT id, created_at, free_inserted, free_duplicates,
+                          paid_inserted, paid_duplicates, errors, analyzed_count, message
+                   FROM webhook_ingest_log
+                   ORDER BY created_at DESC LIMIT ?''',
+                (limit,),
+            )
+            cols = [d[0] for d in c.description]
+            return [dict(zip(cols, row)) for row in c.fetchall()]
+
+    def mark_as_analyzed(self, duids, data_type):
+        """Mark records as analyzed"""
+        if not duids:
+            return
+        table = 'paid' if data_type == 'paid' else 'free'
+        self._validate_table_name(table)
+
+        unique = [str(d) for d in dict.fromkeys(duids) if d not in (None, '', 'N/A')]
+        chunk_size = 500
+        with self.get_connection() as conn:
+            c = conn.cursor()
+            for i in range(0, len(unique), chunk_size):
+                chunk = unique[i:i + chunk_size]
+                placeholders = ','.join('?' * len(chunk))
+                c.execute(
+                    f"UPDATE {table} SET analyzed = 1 WHERE duid IN ({placeholders})",
+                    chunk,
+                )
+            conn.commit()
 
     def save_fraud_results(self, results):
-        """Save fraud detection results"""
+        """Save fraud detection results with full context data"""
+
+        def _safe(v):
+            """Convert numpy/pandas scalars to plain Python types for SQLite."""
+            if v is None:
+                return None
+            import math
+            # numpy bool
+            try:
+                import numpy as np
+                if isinstance(v, np.bool_):
+                    return bool(v)
+                if isinstance(v, np.integer):
+                    return int(v)
+                if isinstance(v, np.floating):
+                    return None if math.isnan(v) else float(v)
+            except ImportError:
+                pass
+            # pandas NA / NaT / NaN
+            try:
+                import pandas as pd
+                if pd.isna(v):
+                    return None
+            except (TypeError, ValueError, ImportError):
+                pass
+            return v
+
+        insert_sql = '''INSERT OR REPLACE INTO fraud_results (
+                        duid, email, risk_score, flags, details, payout_amount, data_type,
+                        webmaster_code, campaign, ad_id, trans_datetime, pov_verified, pov_verified_time,
+                        user_agent, geo_country, first_name, custom_u1, ip, ip_proxy, ip_hosting
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'''
+
+        batch_rows = []
+        for result in results:
+            try:
+                batch_rows.append((
+                    _safe(result['DUID']),
+                    _safe(result['email']),
+                    _safe(result['risk_score']),
+                    str(result['flags']),
+                    str(result['details']),
+                    _safe(result.get('payout_amount', 0)),
+                    _safe(result.get('data_type', 'unknown')),
+                    _safe(result.get('webmaster_code')),
+                    _safe(result.get('campaign')),
+                    _safe(result.get('ad_id')),
+                    _safe(result.get('trans_datetime')),
+                    _safe(result.get('pov_verified')),
+                    _safe(result.get('pov_verified_time')),
+                    _safe(result.get('user_agent')),
+                    _safe(result.get('geo_country')),
+                    _safe(result.get('first_name')),
+                    _safe(result.get('custom_u1')),
+                    _safe(result.get('ip')),
+                    1 if result.get('ip_proxy') else 0,
+                    1 if result.get('ip_hosting') else 0,
+                ))
+            except Exception as e:
+                logger.error(f"Error preparing fraud result for {result.get('DUID')}: {e}")
+
         with self.get_connection() as conn:
             c = conn.cursor()
+            if batch_rows:
+                c.executemany(insert_sql, batch_rows)
 
-            for result in results:
-                try:
-                    c.execute('''INSERT OR REPLACE INTO fraud_results (
-                        duid, email, risk_score, flags, details, payout_amount, data_type,
-                        webmaster_code, campaign
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+            # Backfill geo_country and ip from source tables for any rows still missing them
+            try:
+                c.execute("""
+                    UPDATE fraud_results
+                    SET geo_country = (SELECT p.geo_country FROM paid p WHERE p.duid = fraud_results.duid LIMIT 1)
+                    WHERE geo_country IS NULL
+                    AND EXISTS (SELECT 1 FROM paid p WHERE p.duid = fraud_results.duid AND p.geo_country IS NOT NULL)
+                """)
+                c.execute("""
+                    UPDATE fraud_results
+                    SET geo_country = (SELECT f.geo_country FROM free f WHERE f.duid = fraud_results.duid LIMIT 1)
+                    WHERE geo_country IS NULL
+                    AND EXISTS (SELECT 1 FROM free f WHERE f.duid = fraud_results.duid AND f.geo_country IS NOT NULL)
+                """)
+                c.execute("""
+                    UPDATE fraud_results
+                    SET ip = (SELECT p.ip FROM paid p WHERE p.duid = fraud_results.duid AND p.ip IS NOT NULL AND p.ip != '' LIMIT 1)
+                    WHERE (ip IS NULL OR ip = '')
+                    AND EXISTS (SELECT 1 FROM paid p WHERE p.duid = fraud_results.duid AND p.ip IS NOT NULL AND p.ip != '')
+                """)
+                c.execute("""
+                    UPDATE fraud_results
+                    SET ip = (SELECT f.ip FROM free f WHERE f.duid = fraud_results.duid AND f.ip IS NOT NULL AND f.ip != '' LIMIT 1)
+                    WHERE (ip IS NULL OR ip = '')
+                    AND EXISTS (SELECT 1 FROM free f WHERE f.duid = fraud_results.duid AND f.ip IS NOT NULL AND f.ip != '')
+                """)
+            except Exception as e:
+                logger.warning(f"geo_country/ip backfill skipped: {e}")
+
+            # Backfill custom_u1 (gender) from source tables for any rows still missing it
+            try:
+                c.execute("""
+                    UPDATE fraud_results
+                    SET custom_u1 = (SELECT p.custom_u1 FROM paid p WHERE p.duid = fraud_results.duid LIMIT 1)
+                    WHERE (custom_u1 IS NULL OR custom_u1 = '')
+                    AND data_type = 'paid'
+                    AND EXISTS (SELECT 1 FROM paid p WHERE p.duid = fraud_results.duid AND p.custom_u1 IS NOT NULL AND p.custom_u1 != '')
+                """)
+                c.execute("""
+                    UPDATE fraud_results
+                    SET custom_u1 = (SELECT f.user1 FROM free f WHERE f.duid = fraud_results.duid LIMIT 1)
+                    WHERE (custom_u1 IS NULL OR custom_u1 = '')
+                    AND data_type = 'free'
+                    AND EXISTS (SELECT 1 FROM free f WHERE f.duid = fraud_results.duid AND f.user1 IS NOT NULL AND f.user1 != '')
+                """)
+            except Exception as e:
+                logger.warning(f"custom_u1 backfill skipped: {e}")
+
+    # ── IP flag helpers ───────────────────────────────────────────────────────
+
+    @staticmethod
+    def lookup_ip_flags(ip: str) -> dict:
+        """
+        Query ip-api.com for proxy/hosting flags for a single IP.
+        Returns {'proxy': bool, 'hosting': bool} or {} on failure.
+        """
+        if not ip or ip in ('', 'None'):
+            return {}
+        try:
+            import requests as req
+            r = req.get(
+                f'http://ip-api.com/json/{ip}',
+                params={'fields': 'status,proxy,hosting'},
+                timeout=4
+            )
+            if r.status_code == 200:
+                d = r.json()
+                if d.get('status') == 'success':
+                    return {'proxy': bool(d.get('proxy')), 'hosting': bool(d.get('hosting'))}
+        except Exception:
+            pass
+        return {}
+
+    def get_ip_account_counts(self, affiliate: str = None) -> dict:
+        """
+        Return a dict of {ip: distinct_duid_count} from fraud_results.
+
+        When affiliate is given, scoped to that webmaster_code so the threshold
+        applies within-affiliate (consistent with how build_shared_ip_map works).
+        When affiliate is None, returns global counts (useful for cross-affiliate view).
+
+        Used to seed build_shared_ip_map with historical context so that
+        incremental (new-data-only) analysis runs can still detect IPs that
+        have accumulated accounts across multiple past runs.
+        """
+        try:
+            with self.get_connection() as conn:
+                if affiliate:
+                    rows = conn.execute("""
+                        SELECT ip, COUNT(DISTINCT duid) AS cnt
+                        FROM fraud_results
+                        WHERE webmaster_code = ?
+                          AND ip IS NOT NULL AND ip != ''
+                        GROUP BY ip
+                    """, [affiliate]).fetchall()
+                else:
+                    rows = conn.execute("""
+                        SELECT ip, COUNT(DISTINCT duid) AS cnt
+                        FROM fraud_results
+                        WHERE ip IS NOT NULL AND ip != ''
+                        GROUP BY ip
+                    """).fetchall()
+                return {row[0]: row[1] for row in rows}
+        except Exception as e:
+            logger.warning(f"get_ip_account_counts failed: {e}")
+            return {}
+
+    def get_ip_timestamps(self, affiliate: str = None) -> dict:
+        """
+        Return a dict of {ip: [trans_datetime, ...]} from fraud_results.
+
+        Used to seed build_ip_velocity_map with historical timestamps so
+        velocity is measured across all time, not just the current batch.
+        """
+        try:
+            with self.get_connection() as conn:
+                if affiliate:
+                    rows = conn.execute("""
+                        SELECT ip, trans_datetime
+                        FROM fraud_results
+                        WHERE webmaster_code = ?
+                          AND ip IS NOT NULL AND ip != ''
+                          AND trans_datetime IS NOT NULL
+                        ORDER BY ip, trans_datetime
+                    """, [affiliate]).fetchall()
+                else:
+                    rows = conn.execute("""
+                        SELECT ip, trans_datetime
+                        FROM fraud_results
+                        WHERE ip IS NOT NULL AND ip != ''
+                          AND trans_datetime IS NOT NULL
+                        ORDER BY ip, trans_datetime
+                    """).fetchall()
+                result = {}
+                for ip, ts in rows:
+                    result.setdefault(ip, []).append(ts)
+                return result
+        except Exception as e:
+            logger.warning(f"get_ip_timestamps failed: {e}")
+            return {}
+
+    def save_ip_flags(self, duid: str, ip_proxy: bool, ip_hosting: bool):
+        """Persist ip_proxy / ip_hosting back to fraud_results for a given duid."""
+        try:
+            with self.get_connection() as conn:
+                conn.execute(
+                    'UPDATE fraud_results SET ip_proxy=?, ip_hosting=? WHERE duid=?',
+                    (1 if ip_proxy else 0, 1 if ip_hosting else 0, duid)
+                )
+        except Exception as e:
+            logger.warning(f"save_ip_flags failed for {duid}: {e}")
+
+    def save_admin_enrichment(self, duid: str, enrichment: dict):
+        """
+        Persist admin API enrichment results to fraud_results.
+        Also merges new flags into the main flags column so they appear
+        in the flag dropdown and all flag-based views.
+        enrichment keys: risk_added, flags (list), registration_timestamp,
+        registration_ip, login_ip, shared_card_count,
+        profile_image_uploaded, profile_image_upload_seconds,
+        card_types (list[str]), is_business_card (bool),
+        registration_ip_country, registration_ip_state,
+        login_ip_country, login_ip_state,
+        registration_ip_asn, login_ip_asn,
+        registration_ip_is_datacenter, login_ip_is_datacenter
+        """
+        import json
+        from datetime import datetime as _dt
+        new_flags = enrichment.get('flags') or []
+        flags_json = json.dumps(new_flags)
+
+        card_types = enrichment.get('card_types') or []
+        card_types_json = json.dumps(card_types) if card_types else None
+        is_business = enrichment.get('is_business_card')
+
+        def _bool(val):
+            if val is None:
+                return None
+            return 1 if val else 0
+
+        try:
+            with self.get_connection() as conn:
+                # Merge enrichment flags into the main flags column
+                if new_flags:
+                    row = conn.execute(
+                        "SELECT flags FROM fraud_results WHERE duid = ?", (str(duid),)
+                    ).fetchone()
+                    if row:
+                        existing_raw = row[0] or '[]'
+                        try:
+                            existing = json.loads(
+                                existing_raw.replace("'", '"')
+                                if existing_raw.startswith('[') else '[]'
+                            )
+                        except Exception:
+                            existing = []
+                        merged = list(existing) + [f for f in new_flags if f not in existing]
+                        conn.execute(
+                            "UPDATE fraud_results SET flags = ? WHERE duid = ?",
+                            (json.dumps(merged), str(duid))
+                        )
+
+                conn.execute(
+                    """UPDATE fraud_results SET
+                        admin_enriched = 1,
+                        admin_enriched_at = ?,
+                        admin_enrichment_flags = ?,
+                        admin_risk_added = ?,
+                        risk_score = MIN(100, risk_score + ?),
+                        registration_timestamp = ?,
+                        registration_ip = ?,
+                        login_ip = ?,
+                        shared_card_count = ?,
+                        profile_image_uploaded = ?,
+                        profile_image_upload_seconds = ?,
+                        card_types = ?,
+                        is_business_card = ?,
+                        registration_ip_country = ?,
+                        registration_ip_state = ?,
+                        login_ip_country = ?,
+                        login_ip_state = ?,
+                        registration_ip_asn = ?,
+                        login_ip_asn = ?,
+                        registration_ip_is_datacenter = ?,
+                        login_ip_is_datacenter = ?,
+                        admin_enrich_attempts = 0,
+                        admin_enrich_last_status = NULL,
+                        admin_enrich_last_error_at = NULL
+                    WHERE duid = ?""",
                     (
-                        result['DUID'],
-                        result['email'],
-                        result['risk_score'],
-                        str(result['flags']),
-                        str(result['details']),
-                        result.get('payout_amount', 0),
-                        result.get('data_type', 'unknown'),
-                        result.get('webmaster_code'),
-                        result.get('campaign')
-                    ))
-                except Exception as e:
-                    logger.error(f"Error saving fraud result for {result.get('DUID')}: {e}")
-                    continue
+                        _dt.now().isoformat(),
+                        flags_json,
+                        enrichment.get('risk_added', 0),
+                        enrichment.get('risk_added', 0),
+                        enrichment.get('registration_timestamp'),
+                        enrichment.get('registration_ip'),
+                        enrichment.get('login_ip'),
+                        enrichment.get('shared_card_count', 0),
+                        _bool(enrichment.get('profile_image_uploaded')),
+                        enrichment.get('profile_image_upload_seconds'),
+                        card_types_json,
+                        _bool(is_business),
+                        enrichment.get('registration_ip_country'),
+                        enrichment.get('registration_ip_state'),
+                        enrichment.get('login_ip_country'),
+                        enrichment.get('login_ip_state'),
+                        enrichment.get('registration_ip_asn'),
+                        enrichment.get('login_ip_asn'),
+                        _bool(enrichment.get('registration_ip_is_datacenter')),
+                        _bool(enrichment.get('login_ip_is_datacenter')),
+                        str(duid),
+                    )
+                )
+        except Exception as e:
+            logger.warning(f"save_admin_enrichment failed for {duid}: {e}")
+
+    def mark_admin_enrichment_unavailable(
+        self, duid: str, reason: str, http_status: int
+    ) -> None:
+        """
+        Close out a row so it leaves the unenriched queue: API said 404, or repeated
+        transient failures. No risk points; admin_enrichment_flags records why.
+        """
+        import json
+        from datetime import datetime as _dt
+
+        label = f"ENRICHMENT_UNAVAILABLE({reason},HTTP{http_status})"
+        flags_json = json.dumps([label])
+        try:
+            with self.get_connection() as conn:
+                conn.execute(
+                    """UPDATE fraud_results SET
+                        admin_enriched = 1,
+                        admin_enriched_at = ?,
+                        admin_enrichment_flags = ?,
+                        admin_risk_added = 0
+                    WHERE duid = ?""",
+                    (_dt.now().isoformat(), flags_json, str(duid)),
+                )
+        except Exception as e:
+            logger.warning(f"mark_admin_enrichment_unavailable failed for {duid}: {e}")
+
+    def increment_enrich_failure(self, duid: str, http_status: int) -> int:
+        """
+        Record a failed admin API attempt (non-404). Returns new attempt count after increment.
+        """
+        from datetime import datetime as _dt
+
+        now = _dt.now().isoformat()
+        try:
+            with self.get_connection() as conn:
+                conn.execute(
+                    """UPDATE fraud_results SET
+                        admin_enrich_attempts = COALESCE(admin_enrich_attempts, 0) + 1,
+                        admin_enrich_last_status = ?,
+                        admin_enrich_last_error_at = ?
+                    WHERE duid = ?""",
+                    (http_status, now, str(duid)),
+                )
+                row = conn.execute(
+                    "SELECT COALESCE(admin_enrich_attempts, 0) FROM fraud_results WHERE duid = ?",
+                    (str(duid),),
+                ).fetchone()
+                return int(row[0]) if row else 0
+        except Exception as e:
+            logger.warning(f"increment_enrich_failure failed for {duid}: {e}")
+            return 0
+
+    def get_discover_affiliate_stats(self) -> list:
+        """
+        Return per-affiliate Discover card usage stats for enriched accounts.
+
+        Returns list of dicts:
+          { webmaster_code, total, discover_count, discover_duids }
+        Only includes affiliates where card_types data is present.
+        """
+        import json
+        with self.get_connection() as conn:
+            rows = conn.execute(
+                """SELECT duid, webmaster_code, card_types
+                   FROM fraud_results
+                   WHERE admin_enriched = 1
+                     AND card_types IS NOT NULL
+                     AND webmaster_code IS NOT NULL"""
+            ).fetchall()
+
+        from collections import defaultdict
+        stats = defaultdict(lambda: {"total": 0, "discover_count": 0, "discover_duids": []})
+
+        for duid, affiliate, card_types_json in rows:
+            try:
+                types = json.loads(card_types_json) if card_types_json else []
+            except Exception:
+                types = []
+            stats[affiliate]["total"] += 1
+            if "discover" in [t.lower() for t in types]:
+                stats[affiliate]["discover_count"] += 1
+                stats[affiliate]["discover_duids"].append(str(duid))
+
+        return [
+            {
+                "webmaster_code": aff,
+                "total": v["total"],
+                "discover_count": v["discover_count"],
+                "discover_duids": v["discover_duids"],
+            }
+            for aff, v in stats.items()
+        ]
+
+    def apply_concentration_flag(self, duid: str, flag: str, pts: int):
+        """
+        Add a concentration flag + risk points to an already-enriched account.
+        Used for post-enrichment passes (e.g. Discover concentration).
+        Does not reset admin_enriched or re-run other enrichment fields.
+        """
+        import json
+        try:
+            with self.get_connection() as conn:
+                row = conn.execute(
+                    "SELECT flags, admin_enrichment_flags FROM fraud_results WHERE duid = ?",
+                    (str(duid),)
+                ).fetchone()
+                if not row:
+                    return
+
+                # Merge into main flags
+                for col, raw in [("flags", row[0]), ("admin_enrichment_flags", row[1])]:
+                    existing_raw = raw or '[]'
+                    try:
+                        existing = json.loads(
+                            existing_raw.replace("'", '"')
+                            if existing_raw.startswith('[') else '[]'
+                        )
+                    except Exception:
+                        existing = []
+                    if flag not in existing:
+                        existing.append(flag)
+                        conn.execute(
+                            f"UPDATE fraud_results SET {col} = ? WHERE duid = ?",
+                            (json.dumps(existing), str(duid))
+                        )
+
+                conn.execute(
+                    """UPDATE fraud_results SET
+                        risk_score = MIN(100, risk_score + ?),
+                        admin_risk_added = admin_risk_added + ?
+                       WHERE duid = ?""",
+                    (pts, pts, str(duid))
+                )
+        except Exception as e:
+            logger.warning(f"apply_concentration_flag failed for {duid}: {e}")
+
+    def get_unenriched_duids(
+        self,
+        limit: int = 500,
+        since_analyzed_at: Optional[str] = None,
+        lookback_days: int = 90,
+    ) -> list:
+        """
+        Return DUIDs in fraud_results not yet admin-enriched.
+
+        Ordering priority:
+          1. High-risk accounts first (risk_score >= 50) — catch fraud fast
+          2. Medium-risk next (25-49)
+          3. Low-risk last
+          4. Within each tier, newest analyzed accounts first
+
+        Args:
+            since_analyzed_at: If provided (ISO datetime string), only return DUIDs
+                               analyzed at or after this timestamp.
+            lookback_days: Only include rows where trans_datetime is in the last
+                           N days (or trans_datetime is NULL). Aligns with admin API
+                           date window; keeps old rows from clogging the queue.
+        """
+        where = "(admin_enriched IS NULL OR admin_enriched = 0)"
+        params: list = []
+        if since_analyzed_at:
+            where += " AND analyzed_at >= ?"
+            params.append(since_analyzed_at)
+        lb = max(1, int(lookback_days))
+        cutoff = (datetime.now() - timedelta(days=lb)).strftime("%Y-%m-%d")
+        where += " AND (trans_datetime IS NULL OR date(trans_datetime) >= date(?))"
+        params.append(cutoff)
+        params.append(limit)
+
+        with self.get_connection() as conn:
+            rows = conn.execute(
+                f"""SELECT duid FROM fraud_results
+                   WHERE {where}
+                   ORDER BY
+                     CASE
+                       WHEN risk_score >= 50 THEN 0
+                       WHEN risk_score >= 25 THEN 1
+                       ELSE 2
+                     END,
+                     analyzed_at DESC
+                   LIMIT ?""",
+                params
+            ).fetchall()
+        return [r[0] for r in rows]
+
+    def reset_enrichment_for_last_run(self) -> int:
+        """
+        Clear admin_enriched flag for all accounts from the most recent pipeline
+        run (within 1 hour of the latest analyzed_at). Returns the number of rows reset.
+        Used when re-running enrichment after adding new rules.
+        """
+        since = self.get_last_run_analyzed_at()
+        if not since:
+            return 0
+        with self.get_connection() as conn:
+            cur = conn.execute(
+                """UPDATE fraud_results SET
+                       admin_enriched = 0,
+                       admin_enriched_at = NULL,
+                       admin_enrichment_flags = NULL,
+                       admin_risk_added = 0,
+                       card_types = NULL,
+                       is_business_card = NULL,
+                       admin_enrich_attempts = 0,
+                       admin_enrich_last_status = NULL,
+                       admin_enrich_last_error_at = NULL
+                   WHERE analyzed_at >= ?""",
+                (since,)
+            )
+            return cur.rowcount
+
+    def get_last_run_analyzed_at(self) -> Optional[str]:
+        """Return the start timestamp of the most recent pipeline run batch.
+
+        A "batch" is all records analyzed within 1 hour of the latest analyzed_at.
+        """
+        with self.get_connection() as conn:
+            row = conn.execute(
+                """SELECT MIN(analyzed_at) FROM fraud_results
+                   WHERE analyzed_at >= (
+                     SELECT datetime(MAX(analyzed_at), '-1 hour') FROM fraud_results
+                   )"""
+            ).fetchone()
+            return row[0] if row and row[0] else None
+
+    def get_enrichment_backlog_count(self, lookback_days: int = 90) -> int:
+        """Return unenriched DUIDs in the active enrichment lookback (dashboard)."""
+        lb = max(1, int(lookback_days))
+        cutoff = (datetime.now() - timedelta(days=lb)).strftime("%Y-%m-%d")
+        with self.get_connection() as conn:
+            row = conn.execute(
+                """SELECT COUNT(*) FROM fraud_results
+                   WHERE (admin_enriched IS NULL OR admin_enriched = 0)
+                     AND (trans_datetime IS NULL OR date(trans_datetime) >= date(?))""",
+                (cutoff,),
+            ).fetchone()
+        return row[0] if row else 0
 
     def get_fraud_statistics(self):
         """Get fraud detection statistics"""
@@ -476,20 +1438,44 @@ class Database:
         import pandas as pd
         
         query = """
+        WITH agg AS (
+            SELECT 
+                webmaster_code,
+                COUNT(*) as total_accounts,
+                SUM(CASE WHEN risk_score >= 50 THEN 1 ELSE 0 END) as high_risk_count,
+                SUM(CASE WHEN risk_score >= 25 AND risk_score < 50 THEN 1 ELSE 0 END) as medium_risk_count,
+                SUM(CASE WHEN risk_score < 25 THEN 1 ELSE 0 END) as low_risk_count,
+                ROUND(AVG(risk_score), 1) as avg_risk_score,
+                SUM(payout_amount) as total_payout,
+                SUM(CASE WHEN risk_score >= 50 THEN payout_amount ELSE 0 END) as high_risk_payout,
+                ROUND(SUM(CASE WHEN risk_score >= 50 THEN 1.0 ELSE 0 END) * 100.0 / COUNT(*), 1) as high_risk_pct
+            FROM fraud_results
+            WHERE webmaster_code IS NOT NULL AND webmaster_code != ''
+            GROUP BY webmaster_code
+        ),
+        rev AS (
+            SELECT 
+                fr.webmaster_code,
+                SUM(CASE WHEN fo.outcome = 'confirmed_fraud' THEN 1 ELSE 0 END) AS confirmed_fraud_count,
+                SUM(CASE WHEN fo.outcome = 'confirmed_fraud'
+                    THEN COALESCE(NULLIF(fo.actual_loss, 0), fo.payout_amount, 0) ELSE 0 END) AS confirmed_fraud_payout,
+                SUM(CASE WHEN fo.outcome = 'false_positive' THEN 1 ELSE 0 END) AS false_positive_count,
+                SUM(CASE WHEN fo.outcome = 'false_positive' THEN COALESCE(fo.payout_amount, 0) ELSE 0 END)
+                    AS false_positive_payout
+            FROM fraud_results fr
+            INNER JOIN fraud_outcomes fo ON fr.duid = fo.duid
+            WHERE fo.outcome IN ('confirmed_fraud', 'false_positive')
+            GROUP BY fr.webmaster_code
+        )
         SELECT 
-            webmaster_code,
-            COUNT(*) as total_accounts,
-            SUM(CASE WHEN risk_score >= 50 THEN 1 ELSE 0 END) as high_risk_count,
-            SUM(CASE WHEN risk_score >= 25 AND risk_score < 50 THEN 1 ELSE 0 END) as medium_risk_count,
-            SUM(CASE WHEN risk_score < 25 THEN 1 ELSE 0 END) as low_risk_count,
-            ROUND(AVG(risk_score), 1) as avg_risk_score,
-            SUM(payout_amount) as total_payout,
-            SUM(CASE WHEN risk_score >= 50 THEN payout_amount ELSE 0 END) as high_risk_payout,
-            ROUND(SUM(CASE WHEN risk_score >= 50 THEN 1.0 ELSE 0 END) * 100.0 / COUNT(*), 1) as high_risk_pct
-        FROM fraud_results
-        WHERE webmaster_code IS NOT NULL AND webmaster_code != ''
-        GROUP BY webmaster_code
-        ORDER BY high_risk_count DESC, total_payout DESC
+            agg.*,
+            COALESCE(rev.confirmed_fraud_count, 0) AS confirmed_fraud_count,
+            COALESCE(rev.confirmed_fraud_payout, 0) AS confirmed_fraud_payout,
+            COALESCE(rev.false_positive_count, 0) AS false_positive_count,
+            COALESCE(rev.false_positive_payout, 0) AS false_positive_payout
+        FROM agg
+        LEFT JOIN rev ON agg.webmaster_code = rev.webmaster_code
+        ORDER BY agg.high_risk_count DESC, agg.total_payout DESC
         """
         
         with self.get_connection() as conn:
@@ -611,13 +1597,592 @@ class Database:
         
         return patterns
 
-    def record_fetch(self, data_type, start_date, end_date, count):
-        """Record a data fetch in history"""
+    def record_pipeline_run(self, run_id, run_type='manual', status='running',
+                             started_at=None, completed_at=None, duration_seconds=None,
+                             records_fetched=0, records_analyzed=0, high_risk_found=0,
+                             error_message=None, config_snapshot=None,
+                             date_range_start=None, date_range_end=None):
+        """Upsert a pipeline run record (insert on first call, update on subsequent calls)."""
+        import json
+        from datetime import datetime as _dt
+        if started_at is None:
+            started_at = _dt.now()
+        if isinstance(started_at, _dt):
+            started_at = started_at.isoformat()
+        if isinstance(completed_at, _dt):
+            completed_at = completed_at.isoformat()
+        if isinstance(config_snapshot, dict):
+            config_snapshot = json.dumps(config_snapshot)
+
+        with self.get_connection() as conn:
+            conn.execute('''
+                INSERT INTO pipeline_runs
+                    (run_id, run_type, status, started_at, completed_at, duration_seconds,
+                     records_fetched, records_analyzed, high_risk_found,
+                     error_message, config_snapshot, date_range_start, date_range_end)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(run_id) DO UPDATE SET
+                    status           = excluded.status,
+                    completed_at     = excluded.completed_at,
+                    duration_seconds = excluded.duration_seconds,
+                    records_fetched  = excluded.records_fetched,
+                    records_analyzed = excluded.records_analyzed,
+                    high_risk_found  = excluded.high_risk_found,
+                    error_message    = excluded.error_message,
+                    config_snapshot  = excluded.config_snapshot,
+                    date_range_start = excluded.date_range_start,
+                    date_range_end   = excluded.date_range_end
+            ''', (run_id, run_type, status, started_at, completed_at, duration_seconds,
+                  records_fetched, records_analyzed, high_risk_found,
+                  error_message, config_snapshot, date_range_start, date_range_end))
+            conn.commit()
+
+    def get_pipeline_history(self, limit=20):
+        """Return recent pipeline run records."""
+        with self.get_connection() as conn:
+            rows = conn.execute(
+                'SELECT * FROM pipeline_runs ORDER BY started_at DESC LIMIT ?', (limit,)
+            ).fetchall()
+            cols = [d[0] for d in conn.execute('SELECT * FROM pipeline_runs LIMIT 0').description]
+            return [dict(zip(cols, r)) for r in rows]
+
+    def get_last_pipeline_run(self, run_type=None, status=None):
+        """Most recent pipeline run row, optionally filtered by run_type and/or status."""
+        with self.get_connection() as conn:
+            q = 'SELECT * FROM pipeline_runs WHERE 1=1'
+            params = []
+            if run_type is not None:
+                q += ' AND run_type = ?'
+                params.append(run_type)
+            if status is not None:
+                q += ' AND status = ?'
+                params.append(status)
+            q += ' ORDER BY started_at DESC LIMIT 1'
+            row = conn.execute(q, params).fetchone()
+            if not row:
+                return None
+            cols = [d[0] for d in conn.execute('SELECT * FROM pipeline_runs LIMIT 0').description]
+            return dict(zip(cols, row))
+
+    def record_fetch(
+        self,
+        data_type,
+        start_date,
+        end_date,
+        count,
+        *,
+        records_returned=None,
+        records_duplicates=None,
+        filters=None,
+        http_status=None,
+        error_message=None,
+    ):
+        """Record a data fetch in history (records_fetched = newly inserted rows)."""
+        import json as _json
+
+        filters_json = None
+        if filters:
+            try:
+                filters_json = _json.dumps(filters)
+            except (TypeError, ValueError):
+                filters_json = str(filters)
+
         with self.get_connection() as conn:
             c = conn.cursor()
-            c.execute('''INSERT INTO fetch_history (data_type, start_date, end_date, records_fetched)
-                         VALUES (?, ?, ?, ?)''',
-                      (data_type, start_date, end_date, count))
+            c.execute(
+                '''INSERT INTO fetch_history (
+                       data_type, start_date, end_date, records_fetched,
+                       records_returned, records_duplicates, filters_json,
+                       http_status, error_message
+                   ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                (
+                    data_type,
+                    start_date,
+                    end_date,
+                    int(count or 0),
+                    int(records_returned) if records_returned is not None else None,
+                    int(records_duplicates) if records_duplicates is not None else None,
+                    filters_json,
+                    int(http_status) if http_status is not None else None,
+                    (str(error_message)[:2000] if error_message else None),
+                ),
+            )
+
+    def fail_stale_pipeline_runs(self, stale_hours=6):
+        """
+        Mark pipeline_runs stuck in 'running' longer than stale_hours as failed.
+        Returns number of rows updated.
+        """
+        from datetime import datetime, timedelta
+
+        cutoff = (datetime.now() - timedelta(hours=float(stale_hours))).isoformat()
+        with self.get_connection() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                """UPDATE pipeline_runs
+                   SET status = 'failed',
+                       completed_at = COALESCE(completed_at, datetime('now')),
+                       error_message = COALESCE(
+                           error_message,
+                           'Marked failed: stale running run exceeded '
+                           || ? || ' hours'
+                       )
+                   WHERE status = 'running'
+                     AND started_at < ?""",
+                (stale_hours, cutoff),
+            )
+            conn.commit()
+            return int(cur.rowcount)
+
+    def get_daily_free_coverage(self, start_date, end_date):
+        """
+        Daily free-table row counts and distinct affiliate counts.
+        Returns list of dicts: day, row_count, affiliate_count, analyzed_count, min_duid, max_duid.
+        """
+        with self.get_connection() as conn:
+            cur = conn.execute(
+                """
+                SELECT date(trans_datetime) AS day,
+                       COUNT(*) AS row_count,
+                       COUNT(DISTINCT COALESCE(NULLIF(webmaster_code, ''), site_code)) AS affiliate_count,
+                       SUM(CASE WHEN analyzed THEN 1 ELSE 0 END) AS analyzed_count,
+                       MIN(CAST(duid AS INTEGER)) AS min_duid,
+                       MAX(CAST(duid AS INTEGER)) AS max_duid
+                FROM free
+                WHERE date(trans_datetime) BETWEEN date(?) AND date(?)
+                GROUP BY date(trans_datetime)
+                ORDER BY day
+                """,
+                (start_date, end_date),
+            )
+            cols = [d[0] for d in cur.description]
+            return [dict(zip(cols, row)) for row in cur.fetchall()]
+
+    def get_daily_pipeline_coverage(self, start_date, end_date):
+        """
+        Per-calendar-day fetch + analysis coverage (free + paid + fraud_results).
+        Missing days in range are included with zero counts.
+        """
+        from datetime import datetime, timedelta
+
+        start = datetime.strptime(start_date, '%Y-%m-%d').date()
+        end = datetime.strptime(end_date, '%Y-%m-%d').date()
+
+        with self.get_connection() as conn:
+            free_rows = conn.execute(
+                """
+                SELECT date(trans_datetime) AS day,
+                       COUNT(*) AS free_count,
+                       SUM(CASE WHEN analyzed THEN 1 ELSE 0 END) AS free_analyzed
+                FROM free
+                WHERE date(trans_datetime) BETWEEN date(?) AND date(?)
+                GROUP BY date(trans_datetime)
+                """,
+                (start_date, end_date),
+            ).fetchall()
+            paid_rows = conn.execute(
+                """
+                SELECT date(trans_datetime) AS day,
+                       COUNT(*) AS paid_count,
+                       SUM(CASE WHEN analyzed THEN 1 ELSE 0 END) AS paid_analyzed
+                FROM paid
+                WHERE date(trans_datetime) BETWEEN date(?) AND date(?)
+                GROUP BY date(trans_datetime)
+                """,
+                (start_date, end_date),
+            ).fetchall()
+            fraud_rows = conn.execute(
+                """
+                SELECT date(trans_datetime) AS day,
+                       COUNT(*) AS fraud_count
+                FROM fraud_results
+                WHERE date(trans_datetime) BETWEEN date(?) AND date(?)
+                GROUP BY date(trans_datetime)
+                """,
+                (start_date, end_date),
+            ).fetchall()
+
+        free_by = {r[0]: {'free_count': r[1], 'free_analyzed': r[2]} for r in free_rows}
+        paid_by = {r[0]: {'paid_count': r[1], 'paid_analyzed': r[2]} for r in paid_rows}
+        fraud_by = {r[0]: r[1] for r in fraud_rows}
+
+        out = []
+        cur = start
+        while cur <= end:
+            day = cur.strftime('%Y-%m-%d')
+            f = free_by.get(day, {})
+            p = paid_by.get(day, {})
+            free_count = int(f.get('free_count') or 0)
+            paid_count = int(p.get('paid_count') or 0)
+            free_analyzed = int(f.get('free_analyzed') or 0)
+            paid_analyzed = int(p.get('paid_analyzed') or 0)
+            fetched_total = free_count + paid_count
+            source_analyzed = free_analyzed + paid_analyzed
+            pending = fetched_total - source_analyzed
+            out.append({
+                'day': day,
+                'free_count': free_count,
+                'paid_count': paid_count,
+                'fetched_total': fetched_total,
+                'source_analyzed': source_analyzed,
+                'fraud_count': int(fraud_by.get(day) or 0),
+                'pending_analysis': max(0, pending),
+            })
+            cur += timedelta(days=1)
+        return out
+
+    def get_analysis_backlog_count(self, lookback_days=14):
+        """Count source rows still marked unanalyzed within lookback window."""
+        lookback_days = max(1, min(int(lookback_days), 365))
+        with self.get_connection() as conn:
+            row = conn.execute(
+                """
+                SELECT
+                    (SELECT COUNT(*) FROM free
+                     WHERE (analyzed = 0 OR analyzed IS NULL)
+                       AND date(trans_datetime) >= date('now', ?))
+                  + (SELECT COUNT(*) FROM paid
+                     WHERE (analyzed = 0 OR analyzed IS NULL)
+                       AND date(trans_datetime) >= date('now', ?))
+                """,
+                (f'-{lookback_days} days', f'-{lookback_days} days'),
+            ).fetchone()
+            return int(row[0] or 0)
+
+    def get_oldest_unanalyzed_day(self, lookback_days=14):
+        """Oldest calendar day (YYYY-MM-DD) with unanalyzed rows, or None."""
+        return self.get_priority_unanalyzed_day(
+            lookback_days=lookback_days,
+            priority='oldest',
+        )
+
+    def get_priority_unanalyzed_day(self, lookback_days=14, priority='recent'):
+        """
+        Calendar day with unanalyzed rows, ordered by priority strategy.
+
+        priority:
+          - recent: newest day first (default — keeps current days fresh)
+          - oldest: oldest day first (legacy backlog drain)
+          - today_first: today, then yesterday, then newest remaining
+        """
+        lookback_days = max(1, min(int(lookback_days), 365))
+        priority = (priority or 'recent').strip().lower()
+        agg = 'MAX' if priority == 'recent' else 'MIN'
+
+        with self.get_connection() as conn:
+            row = conn.execute(
+                f"""
+                SELECT {agg}(day) FROM (
+                    SELECT date(trans_datetime) AS day
+                    FROM free
+                    WHERE (analyzed = 0 OR analyzed IS NULL)
+                      AND date(trans_datetime) >= date('now', ?)
+                    UNION
+                    SELECT date(trans_datetime) AS day
+                    FROM paid
+                    WHERE (analyzed = 0 OR analyzed IS NULL)
+                      AND date(trans_datetime) >= date('now', ?)
+                )
+                """,
+                (f'-{lookback_days} days', f'-{lookback_days} days'),
+            ).fetchone()
+            day = row[0] if row and row[0] else None
+
+        if priority != 'today_first' or day:
+            return day
+
+        from datetime import datetime, timedelta
+
+        today = datetime.now().date()
+        for offset in (0, 1):
+            candidate = (today - timedelta(days=offset)).strftime('%Y-%m-%d')
+            if self.count_unanalyzed_for_day(candidate) > 0:
+                return candidate
+        return day
+
+    def count_unanalyzed_for_day(self, day: str) -> int:
+        """Count unanalyzed free + paid rows for one calendar day."""
+        with self.get_connection() as conn:
+            row = conn.execute(
+                """
+                SELECT
+                    (SELECT COUNT(*) FROM free
+                     WHERE (analyzed = 0 OR analyzed IS NULL)
+                       AND date(trans_datetime) = date(?))
+                  + (SELECT COUNT(*) FROM paid
+                     WHERE (analyzed = 0 OR analyzed IS NULL)
+                       AND date(trans_datetime) = date(?))
+                """,
+                (day, day),
+            ).fetchone()
+            return int(row[0] or 0)
+
+    def get_unanalyzed_records_for_day(self, data_type, day, limit=5000):
+        """Load unanalyzed rows for one calendar day (bounded batch)."""
+        import pandas as pd
+
+        table = 'paid' if data_type == 'paid' else 'free'
+        self._validate_table_name(table)
+        limit = max(1, min(int(limit), 50_000))
+        query = f"""
+            SELECT * FROM {table}
+            WHERE (analyzed = 0 OR analyzed IS NULL)
+              AND date(trans_datetime) = date(?)
+            LIMIT ?
+        """
+        with self.get_connection() as conn:
+            return pd.read_sql_query(query, conn, params=[day, limit])
+
+    def record_reconciliation_result(
+        self,
+        day: str,
+        source: str,
+        record_type: str,
+        expected_count,
+        local_count,
+        match_pct,
+        status: str,
+        details=None,
+    ):
+        """Upsert one reconciliation row for a day/source/record_type."""
+        import json
+
+        details_json = json.dumps(details) if details is not None else None
+        with self.get_connection() as conn:
+            conn.execute(
+                """
+                INSERT INTO reconciliation_results (
+                    day, source, record_type, expected_count, local_count,
+                    match_pct, status, details_json, checked_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                ON CONFLICT(day, source, record_type) DO UPDATE SET
+                    expected_count = excluded.expected_count,
+                    local_count = excluded.local_count,
+                    match_pct = excluded.match_pct,
+                    status = excluded.status,
+                    details_json = excluded.details_json,
+                    checked_at = CURRENT_TIMESTAMP
+                """,
+                (
+                    str(day)[:10],
+                    str(source or 'mcp_ps7_ht_signups'),
+                    str(record_type),
+                    int(expected_count) if expected_count is not None else None,
+                    int(local_count) if local_count is not None else None,
+                    float(match_pct) if match_pct is not None else None,
+                    str(status),
+                    details_json,
+                ),
+            )
+
+    def get_reconciliation_results(self, start_date: str, end_date: str, source=None):
+        """
+        Reconciliation rows grouped by day.
+
+        Returns dict day -> {
+            free, paid, total expected/local/match_pct/status,
+            source_expected_total, local_match_pct, reconciliation_status, checked_at
+        }
+        """
+        source = source or 'mcp_ps7_ht_signups'
+        with self.get_connection() as conn:
+            rows = conn.execute(
+                """
+                SELECT day, record_type, expected_count, local_count,
+                       match_pct, status, details_json, checked_at
+                FROM reconciliation_results
+                WHERE source = ?
+                  AND day BETWEEN date(?) AND date(?)
+                ORDER BY day, record_type
+                """,
+                (source, start_date, end_date),
+            ).fetchall()
+
+        by_day = {}
+        for row in rows:
+            day = row[0]
+            rtype = row[1]
+            if day not in by_day:
+                by_day[day] = {
+                    'day': day,
+                    'source': source,
+                    'checked_at': row[7],
+                }
+            by_day[day][f'source_expected_{rtype}'] = row[2]
+            by_day[day][f'local_{rtype}'] = row[3]
+            by_day[day][f'match_pct_{rtype}'] = row[4]
+            by_day[day][f'status_{rtype}'] = row[5]
+            if row[7] and (
+                not by_day[day].get('checked_at')
+                or str(row[7]) > str(by_day[day]['checked_at'])
+            ):
+                by_day[day]['checked_at'] = row[7]
+
+        for day, rec in by_day.items():
+            exp_free = int(rec.get('source_expected_free') or 0)
+            exp_paid = int(rec.get('source_expected_paid') or 0)
+            exp_total = int(rec.get('source_expected_total') or (exp_free + exp_paid))
+            loc_free = int(rec.get('local_free') or 0)
+            loc_paid = int(rec.get('local_paid') or 0)
+            loc_total = int(rec.get('local_total') or (loc_free + loc_paid))
+            rec['source_expected_free'] = exp_free
+            rec['source_expected_paid'] = exp_paid
+            rec['source_expected_total'] = exp_total
+            rec['local_free'] = loc_free
+            rec['local_paid'] = loc_paid
+            rec['local_total'] = loc_total
+            rec['local_match_pct'] = rec.get('match_pct_total')
+            if rec['local_match_pct'] is None and exp_total > 0:
+                rec['local_match_pct'] = round(100.0 * loc_total / exp_total, 2)
+            st_total = rec.get('status_total')
+            st_free = rec.get('status_free')
+            st_paid = rec.get('status_paid')
+            if st_total:
+                rec['reconciliation_status'] = st_total
+            elif st_free == 'source_unavailable' or st_paid == 'source_unavailable':
+                rec['reconciliation_status'] = 'source_unavailable'
+            elif st_free or st_paid:
+                rec['reconciliation_status'] = 'partial'
+            else:
+                rec['reconciliation_status'] = 'unknown'
+            rec['reconciliation_checked_at'] = rec.get('checked_at')
+        return by_day
+
+    def get_local_affiliate_counts_for_day(self, day: str):
+        """Per-affiliate local free/paid counts for one calendar day."""
+        with self.get_connection() as conn:
+            free_rows = conn.execute(
+                """
+                SELECT lower(COALESCE(NULLIF(webmaster_code, ''), site_code, '')) AS aff,
+                       COUNT(*) AS cnt
+                FROM free
+                WHERE date(trans_datetime) = date(?)
+                  AND COALESCE(NULLIF(webmaster_code, ''), site_code, '') != ''
+                GROUP BY aff
+                """,
+                (day,),
+            ).fetchall()
+            paid_rows = conn.execute(
+                """
+                SELECT lower(COALESCE(NULLIF(webmaster_code, ''), '')) AS aff,
+                       COUNT(*) AS cnt
+                FROM paid
+                WHERE date(trans_datetime) = date(?)
+                  AND COALESCE(NULLIF(webmaster_code, ''), '') != ''
+                GROUP BY aff
+                """,
+                (day,),
+            ).fetchall()
+
+        affiliates = {}
+        for aff, cnt in free_rows:
+            if not aff:
+                continue
+            affiliates.setdefault(aff, {'affiliate': aff, 'local_free': 0, 'local_paid': 0})
+            affiliates[aff]['local_free'] = int(cnt)
+        for aff, cnt in paid_rows:
+            if not aff:
+                continue
+            affiliates.setdefault(aff, {'affiliate': aff, 'local_free': 0, 'local_paid': 0})
+            affiliates[aff]['local_paid'] = int(cnt)
+        for rec in affiliates.values():
+            rec['local_total'] = rec['local_free'] + rec['local_paid']
+        return sorted(affiliates.values(), key=lambda x: x['local_total'], reverse=True)
+
+    def get_local_affiliate_daily_counts(self, start_date: str, end_date: str):
+        """
+        Per-affiliate daily free/paid counts by trans_datetime over a range.
+
+        Returns list of dicts:
+          {affiliate, day, local_free, local_paid, local_total}
+        """
+        with self.get_connection() as conn:
+            free_rows = conn.execute(
+                """
+                SELECT lower(COALESCE(NULLIF(webmaster_code, ''), site_code, '')) AS aff,
+                       date(trans_datetime) AS day,
+                       COUNT(*) AS cnt
+                FROM free
+                WHERE date(trans_datetime) BETWEEN date(?) AND date(?)
+                  AND COALESCE(NULLIF(webmaster_code, ''), site_code, '') != ''
+                GROUP BY aff, day
+                """,
+                (start_date, end_date),
+            ).fetchall()
+            paid_rows = conn.execute(
+                """
+                SELECT lower(COALESCE(NULLIF(webmaster_code, ''), '')) AS aff,
+                       date(trans_datetime) AS day,
+                       COUNT(*) AS cnt
+                FROM paid
+                WHERE date(trans_datetime) BETWEEN date(?) AND date(?)
+                  AND COALESCE(NULLIF(webmaster_code, ''), '') != ''
+                GROUP BY aff, day
+                """,
+                (start_date, end_date),
+            ).fetchall()
+
+        key_map = {}
+        for aff, day, cnt in free_rows:
+            if not aff or not day:
+                continue
+            day = str(day)[:10]
+            rec = key_map.setdefault(
+                (aff, day),
+                {'affiliate': aff, 'day': day, 'local_free': 0, 'local_paid': 0},
+            )
+            rec['local_free'] = int(cnt)
+        for aff, day, cnt in paid_rows:
+            if not aff or not day:
+                continue
+            day = str(day)[:10]
+            rec = key_map.setdefault(
+                (aff, day),
+                {'affiliate': aff, 'day': day, 'local_free': 0, 'local_paid': 0},
+            )
+            rec['local_paid'] = int(cnt)
+        out = []
+        for rec in key_map.values():
+            rec['local_total'] = rec['local_free'] + rec['local_paid']
+            out.append(rec)
+        out.sort(key=lambda r: (r['affiliate'], r['day']))
+        return out
+
+    def get_affiliate_risk_daily(self, start_date: str, end_date: str):
+        """
+        Per-affiliate daily risk stats from fraud_results by trans_datetime.
+
+        Returns {(affiliate_lower, day): {high_risk, avg_risk, payout_at_risk, analyzed}}.
+        """
+        with self.get_connection() as conn:
+            rows = conn.execute(
+                """
+                SELECT lower(COALESCE(NULLIF(webmaster_code, ''), '')) AS aff,
+                       date(trans_datetime) AS day,
+                       COUNT(*) AS analyzed,
+                       SUM(CASE WHEN risk_score >= 50 THEN 1 ELSE 0 END) AS high_risk,
+                       ROUND(AVG(risk_score), 1) AS avg_risk,
+                       SUM(CASE WHEN risk_score >= 50 THEN payout_amount ELSE 0 END) AS payout_at_risk
+                FROM fraud_results
+                WHERE trans_datetime IS NOT NULL
+                  AND date(trans_datetime) BETWEEN date(?) AND date(?)
+                  AND COALESCE(NULLIF(webmaster_code, ''), '') != ''
+                GROUP BY aff, day
+                """,
+                (start_date, end_date),
+            ).fetchall()
+        out = {}
+        for aff, day, analyzed, high_risk, avg_risk, payout in rows:
+            if not aff or not day:
+                continue
+            day = str(day)[:10]
+            out[(aff, day)] = {
+                'analyzed': int(analyzed or 0),
+                'high_risk': int(high_risk or 0),
+                'avg_risk': float(avg_risk) if avg_risk is not None else None,
+                'payout_at_risk': round(float(payout or 0), 2),
+            }
+        return out
 
     def backfill_affiliates(self):
         """
@@ -685,33 +2250,80 @@ class Database:
                 'total_updated': updated_from_free + updated_from_paid
             }
 
-    def get_fraud_results(self, data_type=None, min_risk=None, limit=None):
+    def get_fraud_results(
+        self,
+        data_type=None,
+        min_risk=None,
+        max_risk=None,
+        limit=None,
+        exclude_reviewed=False,
+        outcome=None,
+        analyzed_date_from=None,
+        analyzed_date_to=None,
+    ):
         """
         Get fraud results as DataFrame.
-        
+
         Args:
             data_type: Filter by 'free' or 'paid' (None for all)
             min_risk: Minimum risk score (None for all)
+            max_risk: Maximum risk score exclusive (None for all); use 50 for medium bucket 25–49
             limit: Maximum number of records (None for all)
-        
+            exclude_reviewed: If True, exclude DUIDs that already have a fraud_outcomes entry
+            outcome: None, '__any__' (has any outcome row), or fraud_outcomes.outcome value
+            analyzed_date_from: Optional YYYY-MM-DD lower bound on DATE(fr.analyzed_at)
+            analyzed_date_to: Optional YYYY-MM-DD upper bound on DATE(fr.analyzed_at)
+
         Returns:
             pandas DataFrame with fraud results
         """
         import pandas as pd
-        
-        query = "SELECT * FROM fraud_results WHERE 1=1"
-        params = []
-        
+
+        params: list = []
+
+        if exclude_reviewed:
+            query = """
+                SELECT fr.* FROM fraud_results fr
+                LEFT JOIN fraud_outcomes fo ON fr.duid = fo.duid
+                WHERE fo.duid IS NULL
+            """
+        elif outcome == '__any__':
+            query = """
+                SELECT fr.* FROM fraud_results fr
+                INNER JOIN fraud_outcomes fo ON fr.duid = fo.duid
+                WHERE 1=1
+            """
+        elif outcome:
+            query = """
+                SELECT fr.* FROM fraud_results fr
+                INNER JOIN fraud_outcomes fo ON fr.duid = fo.duid AND fo.outcome = ?
+                WHERE 1=1
+            """
+            params.append(outcome)
+        else:
+            query = "SELECT fr.* FROM fraud_results fr WHERE 1=1"
+
         if data_type:
-            query += " AND data_type = ?"
+            query += " AND fr.data_type = ?"
             params.append(data_type)
-        
+
         if min_risk is not None:
-            query += " AND risk_score >= ?"
+            query += " AND fr.risk_score >= ?"
             params.append(min_risk)
-        
-        query += " ORDER BY risk_score DESC"
-        
+
+        if max_risk is not None:
+            query += " AND fr.risk_score < ?"
+            params.append(max_risk)
+
+        if analyzed_date_from:
+            query += " AND DATE(fr.analyzed_at) >= DATE(?)"
+            params.append(analyzed_date_from)
+        if analyzed_date_to:
+            query += " AND DATE(fr.analyzed_at) <= DATE(?)"
+            params.append(analyzed_date_to)
+
+        query += " ORDER BY fr.risk_score DESC"
+
         if limit:
             query += " LIMIT ?"
             params.append(int(limit))
@@ -719,41 +2331,92 @@ class Database:
         with self.get_connection() as conn:
             df = pd.read_sql_query(query, conn, params=params)
             
-            # Join with free/paid tables to get additional fields
+            # Join with free/paid tables to get additional fields (one row per fraud_results row).
+            # Merging both tables on duid for every row causes a Cartesian product when the same
+            # duid exists in free and paid (e.g. lead → conversion). Merge only the source table
+            # indicated by fraud_results.data_type, with a fallback for ambiguous rows.
             if len(df) > 0:
-                # Get DUIDs
                 duids = df['duid'].tolist()
                 placeholders = ','.join(['?'] * len(duids))
                 
-                # Get free data
                 free_query = f"""
-                    SELECT duid, email, ip, geo_country, pov_verified, pov_verified_time, 
+                    SELECT duid, email, ip, geo_country, pov_verified, pov_verified_time,
                            trans_datetime, campaign, ad_id
-                    FROM free 
+                    FROM free
                     WHERE duid IN ({placeholders})
                 """
                 free_df = pd.read_sql_query(free_query, conn, params=duids)
+                if len(free_df) > 0:
+                    free_df = free_df.drop_duplicates(subset=['duid'], keep='last')
                 
-                # Get paid data
                 paid_query = f"""
                     SELECT duid, email, ip, geo_country, first_name, last_name,
                            trans_datetime, campaign, ad_id
-                    FROM paid 
+                    FROM paid
                     WHERE duid IN ({placeholders})
                 """
                 paid_df = pd.read_sql_query(paid_query, conn, params=duids)
-                
-                # Merge free data
-                if len(free_df) > 0:
-                    df = df.merge(free_df, on='duid', how='left', suffixes=('', '_free'))
-                    # Calculate pov_seconds if available
-                    if 'pov_verified_time' in df.columns and 'trans_datetime' in df.columns:
-                        df['pov_seconds'] = pd.to_datetime(df['pov_verified_time']) - pd.to_datetime(df['trans_datetime'])
-                        df['pov_seconds'] = df['pov_seconds'].dt.total_seconds()
-                
-                # Merge paid data
                 if len(paid_df) > 0:
-                    df = df.merge(paid_df, on='duid', how='left', suffixes=('', '_paid'))
+                    paid_df = paid_df.drop_duplicates(subset=['duid'], keep='last')
+                
+                def _merge_free(base, fdf):
+                    if len(base) == 0:
+                        return base
+                    if len(fdf) == 0:
+                        return base.copy()
+                    out = base.merge(fdf, on='duid', how='left', suffixes=('', '_free'))
+                    if 'pov_verified_time' in out.columns and 'trans_datetime' in out.columns:
+                        out['pov_seconds'] = (
+                            pd.to_datetime(out['pov_verified_time'])
+                            - pd.to_datetime(out['trans_datetime'])
+                        ).dt.total_seconds()
+                    return out
+                
+                def _merge_paid(base, pdf):
+                    if len(base) == 0:
+                        return base
+                    if len(pdf) == 0:
+                        return base.copy()
+                    return base.merge(pdf, on='duid', how='left', suffixes=('', '_paid'))
+                
+                def _norm_dt(val):
+                    if val is None or pd.isna(val):
+                        return ''
+                    s = str(val).strip().lower()
+                    return '' if s in ('', 'nan', 'none') else s
+                
+                dt_col = df['data_type'].map(_norm_dt) if 'data_type' in df.columns else pd.Series([''] * len(df))
+                mask_free = dt_col.eq('free')
+                mask_paid = dt_col.eq('paid')
+                mask_ambig = ~(mask_free | mask_paid)
+                
+                parts = []
+                if mask_free.any():
+                    parts.append(_merge_free(df.loc[mask_free].copy(), free_df))
+                if mask_paid.any():
+                    parts.append(_merge_paid(df.loc[mask_paid].copy(), paid_df))
+                
+                if mask_ambig.any():
+                    ambig = df.loc[mask_ambig].copy()
+                    in_f = ambig['duid'].isin(free_df['duid']) if len(free_df) > 0 else pd.Series(False, index=ambig.index)
+                    in_p = ambig['duid'].isin(paid_df['duid']) if len(paid_df) > 0 else pd.Series(False, index=ambig.index)
+                    only_f = ambig[in_f & ~in_p]
+                    only_p = ambig[in_p & ~in_f]
+                    both = ambig[in_f & in_p]
+                    neither = ambig[~in_f & ~in_p]
+                    if len(only_f) > 0:
+                        parts.append(_merge_free(only_f, free_df))
+                    if len(only_p) > 0:
+                        parts.append(_merge_paid(only_p, paid_df))
+                    if len(both) > 0:
+                        # Same duid in both tables: prefer paid enrichment (one row; avoids fan-out).
+                        parts.append(_merge_paid(both, paid_df))
+                    if len(neither) > 0:
+                        parts.append(neither)
+                
+                if parts:
+                    df = pd.concat(parts, ignore_index=True)
+                    df = df.sort_values(by='risk_score', ascending=False, kind='mergesort')
         
         return df
 
@@ -819,6 +2482,88 @@ class Database:
             
             logger.info(f"Recorded outcome '{outcome}' for DUID: {duid}")
             return True
+
+    def get_affiliate_action(self, webmaster_code: str) -> Optional[dict]:
+        """Return one affiliate_actions row as a dict, or None."""
+        if not webmaster_code:
+            return None
+        cols = (
+            'webmaster_code', 'action_status', 'action_type', 'trigger_reason',
+            'notes', 'updated_by', 'updated_at', 'actioned_at', 'trigger_run_id',
+        )
+        with self.get_connection() as conn:
+            row = conn.execute(
+                f"""SELECT {', '.join(cols)} FROM affiliate_actions
+                    WHERE webmaster_code = ?""",
+                (webmaster_code,),
+            ).fetchone()
+        if not row:
+            return None
+        return dict(zip(cols, row))
+
+    def list_affiliate_actions(self) -> list:
+        """All affiliate action rows (for dashboard badges / filters)."""
+        cols = (
+            'webmaster_code', 'action_status', 'action_type', 'trigger_reason',
+            'notes', 'updated_by', 'updated_at', 'actioned_at', 'trigger_run_id',
+        )
+        with self.get_connection() as conn:
+            rows = conn.execute(
+                f"""SELECT {', '.join(cols)} FROM affiliate_actions
+                    ORDER BY updated_at DESC"""
+            ).fetchall()
+        return [dict(zip(cols, r)) for r in rows]
+
+    def upsert_affiliate_action(
+        self,
+        webmaster_code: str,
+        action_status: str,
+        action_type: Optional[str] = None,
+        trigger_reason: Optional[str] = None,
+        notes: Optional[str] = None,
+        updated_by: Optional[str] = None,
+        actioned_at: Optional[str] = None,
+        trigger_run_id: Optional[str] = None,
+    ) -> bool:
+        """Insert or update affiliate_actions for webmaster_code."""
+        if not webmaster_code or not action_status:
+            return False
+        at = (action_type or '').strip() or None
+        tr = (trigger_reason or '').strip() or None
+        nt = (notes or '').strip() or None
+        ub = (updated_by or '').strip() or None
+        aa = (actioned_at or '').strip() or None
+        rid = (trigger_run_id or '').strip() or None
+        with self.get_connection() as conn:
+            conn.execute(
+                """INSERT INTO affiliate_actions (
+                       webmaster_code, action_status, action_type, trigger_reason,
+                       notes, updated_by, updated_at, actioned_at, trigger_run_id
+                   ) VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?, ?)
+                   ON CONFLICT(webmaster_code) DO UPDATE SET
+                       action_status = excluded.action_status,
+                       action_type = excluded.action_type,
+                       trigger_reason = excluded.trigger_reason,
+                       notes = excluded.notes,
+                       updated_by = excluded.updated_by,
+                       updated_at = CURRENT_TIMESTAMP,
+                       actioned_at = excluded.actioned_at,
+                       trigger_run_id = excluded.trigger_run_id
+                """,
+                (webmaster_code, action_status, at, tr, nt, ub, aa, rid),
+            )
+        return True
+
+    def delete_affiliate_action(self, webmaster_code: str) -> int:
+        """Remove affiliate action record. Returns rows deleted."""
+        if not webmaster_code:
+            return 0
+        with self.get_connection() as conn:
+            cur = conn.execute(
+                'DELETE FROM affiliate_actions WHERE webmaster_code = ?',
+                (webmaster_code,),
+            )
+            return cur.rowcount or 0
 
     def get_pending_reviews(self, min_risk=50, limit=50):
         """
@@ -915,37 +2660,50 @@ class Database:
             c.execute("SELECT COUNT(*) FROM fraud_results WHERE risk_score >= 25 AND risk_score < 50")
             metrics['total_flagged_medium'] = c.fetchone()[0]
             
-            # Reviewed counts by tier and outcome
+            # Reviewed counts by tier and outcome.
+            # Confirmed fraud $: use actual_loss when set and non-zero; otherwise payout at time of review.
             c.execute("""
-                SELECT outcome, COUNT(*), SUM(payout_amount), SUM(actual_loss), SUM(recovery_amount)
-                FROM fraud_outcomes 
+                SELECT outcome, COUNT(*),
+                       SUM(CASE WHEN outcome = 'confirmed_fraud'
+                           THEN COALESCE(NULLIF(actual_loss, 0), payout_amount, 0) ELSE 0 END),
+                       SUM(CASE WHEN outcome = 'false_positive'
+                           THEN COALESCE(payout_amount, 0) ELSE 0 END),
+                       SUM(CASE WHEN outcome = 'confirmed_fraud'
+                           THEN COALESCE(recovery_amount, 0) ELSE 0 END)
+                FROM fraud_outcomes
                 WHERE risk_score >= 50
                 GROUP BY outcome
             """)
             for row in c.fetchall():
-                outcome, count, payout, loss, recovery = row
+                outcome, count, cf_amt, fp_amt, recovery = row
                 metrics['reviewed_high'] += count
                 if outcome == 'confirmed_fraud':
                     metrics['confirmed_fraud_high'] = count
-                    metrics['confirmed_fraud_amount'] += (loss or 0)
+                    metrics['confirmed_fraud_amount'] += (cf_amt or 0)
                     metrics['recovery_amount'] += (recovery or 0)
                 elif outcome == 'false_positive':
                     metrics['false_positives_high'] = count
-                    metrics['false_positive_amount'] += (payout or 0)
+                    metrics['false_positive_amount'] += (fp_amt or 0)
             
             c.execute("""
-                SELECT outcome, COUNT(*), SUM(payout_amount)
-                FROM fraud_outcomes 
+                SELECT outcome, COUNT(*),
+                       SUM(CASE WHEN outcome = 'confirmed_fraud'
+                           THEN COALESCE(NULLIF(actual_loss, 0), payout_amount, 0) ELSE 0 END),
+                       SUM(CASE WHEN outcome = 'false_positive'
+                           THEN COALESCE(payout_amount, 0) ELSE 0 END)
+                FROM fraud_outcomes
                 WHERE risk_score >= 25 AND risk_score < 50
                 GROUP BY outcome
             """)
             for row in c.fetchall():
-                outcome, count, payout = row
+                outcome, count, cf_amt, fp_amt = row
                 metrics['reviewed_medium'] += count
                 if outcome == 'confirmed_fraud':
                     metrics['confirmed_fraud_medium'] = count
+                    metrics['confirmed_fraud_amount'] += (cf_amt or 0)
                 elif outcome == 'false_positive':
                     metrics['false_positives_medium'] = count
+                    metrics['false_positive_amount'] += (fp_amt or 0)
             
             # Calculate precision (if we have enough data)
             reviewed_high = metrics['confirmed_fraud_high'] + metrics['false_positives_high']
@@ -1096,8 +2854,10 @@ class Database:
                         SUM(CASE WHEN outcome = 'confirmed_fraud' THEN 1 ELSE 0 END),
                         SUM(CASE WHEN outcome = 'false_positive' THEN 1 ELSE 0 END),
                         SUM(CASE WHEN outcome = 'under_review' THEN 1 ELSE 0 END),
-                        SUM(CASE WHEN outcome = 'confirmed_fraud' THEN actual_loss ELSE 0 END),
-                        SUM(recovery_amount)
+                        SUM(CASE WHEN outcome = 'confirmed_fraud'
+                            THEN COALESCE(NULLIF(actual_loss, 0), payout_amount, 0) ELSE 0 END),
+                        SUM(CASE WHEN outcome = 'confirmed_fraud'
+                            THEN COALESCE(recovery_amount, 0) ELSE 0 END)
                     FROM fraud_outcomes
                     WHERE risk_score >= ? AND risk_score <= ?
                 """, (min_score, max_score))
@@ -1191,24 +2951,28 @@ class Database:
                                      'credit_count', 'credit_amount',
                                      'ip', 'geo_country', 'zip', 'risk_score', 'flags'])
 
-    def get_name_correlations(self, min_accounts=3):
+    def get_name_correlations(self, min_accounts=3, exclude_names=None):
         """
         Find accounts with similar billing names (potential fraud rings).
-        
+        Counts DISTINCT DUIDs to avoid inflating counts from multi-transaction accounts.
+
         Args:
-            min_accounts: Minimum accounts with same name
-        
+            min_accounts: Minimum unique accounts (by DUID) with same name
+            exclude_names: List of lowercase billing names to exclude (e.g. QA testers)
+
         Returns:
             DataFrame with name clusters
         """
         import pandas as pd
-        
-        # Exact name match
+
+        # Group by name, counting distinct DUIDs (accounts) not rows (transactions)
         query = """
-            SELECT 
+            SELECT
                 LOWER(first_name || ' ' || last_name) as full_name,
-                COUNT(*) as account_count,
+                COUNT(DISTINCT duid) as account_count,
+                COUNT(*) as transaction_count,
                 COUNT(DISTINCT processor_subscriber_id) as unique_cards,
+                COUNT(DISTINCT email) as unique_emails,
                 GROUP_CONCAT(DISTINCT email) as emails,
                 SUM(payout_amount) as total_payout,
                 SUM(chargeback_count) as total_chargebacks
@@ -1216,13 +2980,18 @@ class Database:
             WHERE first_name IS NOT NULL AND last_name IS NOT NULL
               AND first_name != '' AND last_name != ''
             GROUP BY LOWER(first_name || ' ' || last_name)
-            HAVING COUNT(*) >= ?
+            HAVING COUNT(DISTINCT duid) >= ?
             ORDER BY account_count DESC
         """
         
         with self.get_connection() as conn:
             df = pd.read_sql_query(query, conn, params=[min_accounts])
-        
+
+        # Exclude known QA/internal billing names
+        if exclude_names and not df.empty:
+            exclude_lower = {n.lower().strip() for n in exclude_names}
+            df = df[~df['full_name'].str.lower().isin(exclude_lower)]
+
         return df
 
     def get_ip_billing_correlations(self):

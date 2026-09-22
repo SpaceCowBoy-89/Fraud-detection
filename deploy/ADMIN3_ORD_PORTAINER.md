@@ -32,7 +32,7 @@ Scroll to **Environment variables** → **Advanced mode** (if shown).
 
 Add each variable from your Mac **`~/fraud-detection/.env`** (gitignored):
 
-- `FLASK_SECRET_KEY`
+- `FLASK_SECRET_KEY` (required — stack fails startup without it when `REQUIRE_FLASK_SECRET_KEY=1`)
 - `FRAUD_DETECTION_API_KEY`
 - `ADMIN2_LOGIN_REQUIRED` = `1`
 - `ADMIN_API_USERNAME`
@@ -40,6 +40,11 @@ Add each variable from your Mac **`~/fraud-detection/.env`** (gitignored):
 - `PORT` = `5050`
 - `IMAGE_TAG` = `latest`
 - `WEBHOOK_INGEST_TOKEN` = empty (optional)
+
+Already baked into **`deploy/admin3-ord-portainer-stack.yml`** (do not omit when editing the stack file):
+
+- `REQUIRE_FLASK_SECRET_KEY=1`
+- `SESSION_COOKIE_SECURE` / `TRUST_PROXY_HTTPS` default `1` — keep when serving HTTPS; set both to `0` only for plain HTTP smoke tests
 
 ## 5. Deploy
 

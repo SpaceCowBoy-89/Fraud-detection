@@ -404,7 +404,7 @@ class EDAAnalyzer:
             logger.warning("No DUID column for outlier tracking")
             return outlier_duids
         
-        # Amount outliers (Z-score > 3)
+        # Amount outliers (Z-score > 3). Need enough spread that a lone spike registers.
         if 'payout_amount' in df.columns:
             amounts = pd.to_numeric(df['payout_amount'], errors='coerce')
             amounts_clean = amounts[amounts > 0]
@@ -417,6 +417,13 @@ class EDAAnalyzer:
                     z_scores = np.abs((amounts - mean) / std)
                     amount_outliers = df[z_scores > 3]['duid'].tolist()
                     outlier_duids.extend(amount_outliers)
+
+                # Small / flat samples: Z-score often misses a single spike. Also flag
+                # payouts far above the median (10x) when median is positive.
+                median = float(amounts_clean.median())
+                if median > 0:
+                    spike = df[amounts >= (median * 10)]['duid'].tolist()
+                    outlier_duids.extend(spike)
         
         # Disposable email domains
         if 'email_disposable' in df.columns:

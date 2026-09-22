@@ -22,6 +22,12 @@ except ImportError:
     print("Install with: pip install gender-guesser")
 
 class EmailFraudDetector:
+    _RE_DIGIT_SUFFIX = re.compile(r'(\d{4,5})$')
+    _RE_NAME_NUMBER = re.compile(r'^([a-z]+)(\d+)([a-z]+)(\d+)')
+    _NUMBER_WORDS = (
+        'zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten',
+    )
+
     def __init__(self, config=None):
         """
         Initialize the fraud detector.
@@ -71,6 +77,8 @@ class EmailFraudDetector:
         # IP geolocation cache and settings
         self.ip_geolocation_cache = {}
         self.ip_geolocation_enabled = True
+        # Live ip-api.com lookups are opt-in; batch scoring must stay cache-only
+        self.ip_geolocation_live_lookups = False
         self.ip_api_last_call = 0
         self.ip_api_rate_limit = 0.5  # seconds between API calls (free tier limit)
         
@@ -328,12 +336,17 @@ class EmailFraudDetector:
 
         return 'unknown'
 
-    def get_ip_geolocation(self, ip_address):
+    def get_ip_geolocation(self, ip_address, *, allow_network=None):
         """
-        Get geolocation data for an IP address using ip-api.com (free tier).
+        Get geolocation data for an IP address.
+
+        Batch scoring uses the cache only (no network). Live ip-api.com lookups
+        are opt-in via allow_network=True or ip_geolocation_live_lookups=True —
+        free-tier rate limits make live calls unsafe inside large analyze loops.
         
         Args:
             ip_address: IP address to look up
+            allow_network: Override live lookup. None → use ip_geolocation_live_lookups.
             
         Returns:
             dict with keys: country_code, country, region, city, or None if lookup fails
@@ -346,6 +359,11 @@ class EmailFraudDetector:
         # Check cache first
         if ip_str in self.ip_geolocation_cache:
             return self.ip_geolocation_cache[ip_str]
+
+        if allow_network is None:
+            allow_network = bool(getattr(self, 'ip_geolocation_live_lookups', False))
+        if not allow_network:
+            return None
         
         # Rate limiting for free tier (45 requests per minute)
         elapsed = time.time() - self.ip_api_last_call
@@ -404,9 +422,9 @@ class EmailFraudDetector:
         us_city_state_counts   = Counter()
         intl_country_city_counts = Counter()
 
-        for _, row in df.iterrows():
-            ip      = row.get(ip_col)  if ip_col  and ip_col  in row else None
-            country = row.get(geo_col) if geo_col and geo_col in row else None
+        for row in df.to_dict(orient='records'):
+            ip      = row.get(ip_col)  if ip_col  else None
+            country = row.get(geo_col) if geo_col else None
 
             # Prefer cached geo (populated by earlier account-detail lookups)
             geo = None
@@ -648,7 +666,7 @@ class EmailFraudDetector:
                 details['dot_count'] = dot_count
 
             # 2. Digit Suffix Pattern (4-5 digits at end)
-            digit_suffix = re.search(r'(\d{4,5})$', username)
+            digit_suffix = self._RE_DIGIT_SUFFIX.search(username)
             if digit_suffix:
                 risk_score += self.get_risk_score('digit_suffix')
                 flags.append('DIGIT_SUFFIX')
@@ -663,7 +681,7 @@ class EmailFraudDetector:
 
             # 4. Name-Number-Name-Number Pattern
             # Detects patterns like: firstname12lastname4567@domain
-            name_num_pattern = re.search(r'^([a-z]+)(\d+)([a-z]+)(\d+)', username)
+            name_num_pattern = self._RE_NAME_NUMBER.search(username)
             if name_num_pattern:
                 risk_score += self.get_risk_score('name_number_pattern')
                 flags.append('NAME_NUMBER_PATTERN')
@@ -683,14 +701,13 @@ class EmailFraudDetector:
 
             # 5a. Written Number Word Detection (e.g., emillythree, fouremilly)
             # Check for written number words combined with names
-            number_words = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten']
-            has_number_word = any(num_word in username for num_word in number_words)
+            has_number_word = any(num_word in username for num_word in self._NUMBER_WORDS)
 
             if has_number_word:
                 # This pattern is suspicious when combined with a name
                 risk_score += self.get_risk_score('written_number_pattern')
                 flags.append('WRITTEN_NUMBER_PATTERN')
-                details['written_numbers'] = [nw for nw in number_words if nw in username]
+                details['written_numbers'] = [nw for nw in self._NUMBER_WORDS if nw in username]
 
             # 5b. Repeated Word Detection (dynamic pattern)
             # Check if email username contains words that appear frequently across dataset

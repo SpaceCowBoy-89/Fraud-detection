@@ -1,13 +1,20 @@
 """Shared-card whitelist behavior in admin enrichment."""
 
 import json
+import sys
 import tempfile
 from pathlib import Path
 
 import pytest
 
+ROOT = Path(__file__).resolve().parent.parent
+SCRIPTS = ROOT / 'scripts'
+for p in (str(ROOT), str(SCRIPTS)):
+    if p not in sys.path:
+        sys.path.insert(0, p)
+
 from config import Config
-from scripts.admin_enricher import AdminEnricher
+from admin_enricher import AdminEnricher
 
 
 @pytest.fixture

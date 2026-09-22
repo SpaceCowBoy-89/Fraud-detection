@@ -176,107 +176,22 @@ def _run_fraud_analysis_on_dataframe(db, config, data_type, df):
     """
     Preprocess + score rows in df, write fraud_results, mark source rows analyzed.
     Used by webhook ingest when analyze=true. Does not touch global analysis task status.
+    Delegates to shared ``pipeline_analysis.analyze_dataframe``.
     """
-    import pandas as pd
-    from pathlib import Path
-
-    if df is None or df.empty:
-        return {'analyzed': 0, 'high_risk': 0, 'results': []}
-
     scripts_dir = Path(__file__).resolve().parent.parent / 'scripts'
-    sys.path.insert(0, str(scripts_dir))
-    from email_fraud_detector import EmailFraudDetector
-    from data_preprocessor import DataPreprocessor
+    if str(scripts_dir) not in sys.path:
+        sys.path.insert(0, str(scripts_dir))
+    from pipeline_analysis import analyze_dataframe
 
-    preprocessor = DataPreprocessor()
-    df, _quality = preprocessor.preprocess_batch(df.copy())
-
-    detector = EmailFraudDetector(config)
-    df = detector.normalize_column_names(df)
-    detector.build_repeated_word_map(df)
-    detector.build_geographic_cluster_maps(df)
-    detector.build_shared_ip_map(df, db=db)
-    detector.build_ip_velocity_map(df, db=db)
-    detector.build_gender_concentration_map(df)
-    detector.build_sequential_email_map(df)
-    detector.build_affiliate_domain_concentration_map(df)
-
-    results = []
-    email_col = detector.column_map.get('email')
-    high_th = int(config.get_risk_threshold('high') or 50)
-    skip_codes = config.get_affiliate_analysis_skip_codes_lower(include_house_in_analysis=False)
-
-    for _idx, row in df.iterrows():
-        duid_val = detector.get_column(row, 'duid', None)
-        if duid_val is None or str(duid_val).strip() == '':
-            continue
-
-        webmaster_code = detector.get_column(row, 'webmaster_code', None)
-        if not webmaster_code:
-            for col in ('webmaster_code', 'site_code'):
-                if col in row.index and pd.notna(row[col]) and row[col] != '':
-                    webmaster_code = row[col]
-                    break
-        if skip_codes and webmaster_code and str(webmaster_code).strip().lower() in skip_codes:
-            continue
-        campaign = detector.get_column(row, 'campaign', None)
-        if not campaign and 'campaign' in row.index and pd.notna(row['campaign']):
-            campaign = row['campaign']
-
-        analysis = detector.analyze_email(
-            row[email_col] if email_col else None,
-            trans_datetime=detector.get_column(row, 'trans_datetime', None),
-            pov_verified=detector.get_column(row, 'pov_verified', None),
-            pov_verified_time=detector.get_column(row, 'pov_verified_time', None),
-            ip_address=detector.get_column(row, 'ip', None),
-            user_agent=detector.get_column(row, 'custom_http_user_agent', None),
-            first_name=detector.get_column(row, 'first_name', None),
-            user1=(
-                detector.get_column(row, 'custom_u1', None)
-                or detector.get_column(row, 'user1', None)
-            ),
-        )
-        analysis['DUID'] = duid_val
-        analysis['payout_amount'] = detector.get_column(row, 'payout_amount', 0)
-        analysis['data_type'] = data_type
-        analysis['webmaster_code'] = webmaster_code
-        analysis['campaign'] = campaign
-        analysis['ad_id'] = detector.get_column(row, 'ad_id', None)
-        analysis['trans_datetime'] = detector.get_column(row, 'trans_datetime', None)
-        analysis['pov_verified'] = detector.get_column(row, 'pov_verified', None)
-        analysis['pov_verified_time'] = detector.get_column(row, 'pov_verified_time', None)
-        analysis['user_agent'] = detector.get_column(row, 'custom_http_user_agent', None)
-        src_geo = detector.get_column(row, 'geo_country', None)
-        analysis['geo_country'] = src_geo or analysis.get('geo_country')
-        analysis['ip'] = detector.get_column(row, 'ip', None)
-        analysis['first_name'] = detector.get_column(row, 'first_name', None)
-        analysis['custom_u1'] = (
-            detector.get_column(row, 'custom_u1', None)
-            or detector.get_column(row, 'user1', None)
-        )
-        results.append(analysis)
-
-    detector.apply_gender_concentration_to_results(results)
-    detector.apply_sequential_email_to_results(results)
-    detector.apply_affiliate_domain_concentration_to_results(results)
-    db.save_fraud_results(results)
-    duids = [r['DUID'] for r in results if r.get('DUID') not in (None, 'N/A')]
-    if duids:
-        db.mark_as_analyzed(duids, data_type)
-
-    return {
-        'analyzed': len(results),
-        'high_risk': sum(1 for r in results if r.get('risk_score', 0) >= high_th),
-        'results': [
-            {
-                'duid': r.get('DUID'),
-                'email': r.get('email'),
-                'risk_score': r.get('risk_score'),
-                'flags': r.get('flags'),
-            }
-            for r in results
-        ],
-    }
+    return analyze_dataframe(
+        db,
+        config,
+        data_type,
+        df,
+        return_results=True,
+        include_house_in_analysis=False,
+        mark_skipped_analyzed=True,
+    )
 
 
 def validate_duid(duid):
@@ -5040,12 +4955,7 @@ def create_app(db, config, api_client=None):
                 }
                 
                 try:
-                    # Import detector
-                    sys.path.insert(0, str(Path(__file__).parent.parent / 'scripts'))
-                    from email_fraud_detector import EmailFraudDetector
-                    
                     results_summary = {'free': 0, 'paid': 0, 'high_risk': 0, 'house_skipped': 0, 'duid_filtered': 0}
-                    high_th = int(config.get_risk_threshold('high') or 50)
 
                     skip_affiliate_lower = config.get_affiliate_analysis_skip_codes_lower(
                         include_house_in_analysis=include_house
@@ -5057,6 +4967,7 @@ def create_app(db, config, api_client=None):
                     # Use validated data types only
                     valid_types = ['free', 'paid']
                     import pandas as pd
+                    sys.path.insert(0, str(Path(__file__).parent.parent / 'scripts'))
                     for type_idx, data_type in enumerate(valid_types):
                         _running_tasks['analysis']['progress'] = int((type_idx / len(valid_types)) * 50)
                         _running_tasks['analysis']['current_type'] = data_type
@@ -5146,121 +5057,38 @@ def create_app(db, config, api_client=None):
                                     continue
 
                         total_records = len(df)
-                        
-                        # ============================================================
-                        # STEP 1: PREPROCESSING (Automatic Data Cleaning)
-                        # ============================================================
-                        sys.path.insert(0, str(Path(__file__).parent.parent / 'scripts'))
-                        from data_preprocessor import DataPreprocessor
-                        
-                        preprocessor = DataPreprocessor()
-                        df, quality_report = preprocessor.preprocess_batch(df)
-                        
-                        # Log preprocessing summary
-                        if quality_report:
-                            issues = quality_report.get('issues_fixed', 0)
-                            if issues > 0:
-                                logger.info(f"Preprocessing fixed {issues} data quality issues in {data_type} data")
-                        
-                        # ============================================================
-                        # STEP 2: FRAUD DETECTION
-                        # ============================================================
-                        detector = EmailFraudDetector(config)
-                        df = detector.normalize_column_names(df)
-                        detector.build_repeated_word_map(df)
-                        detector.build_geographic_cluster_maps(df)
-                        detector.build_shared_ip_map(df, db=db)
-                        detector.build_ip_velocity_map(df, db=db)
-                        detector.build_gender_concentration_map(df)
-                        detector.build_sequential_email_map(df)
-                        detector.build_affiliate_domain_concentration_map(df)
-                        
-                        # Analyze
-                        results = []
-                        email_col = detector.column_map.get('email')
-                        processed = 0
-                        
-                        for idx, row in df.iterrows():
-                            processed += 1
 
-                            _duid = detector.get_column(row, 'duid', None)
-                            if _duid is None or str(_duid).strip() == '':
-                                continue
-                            
-                            # Get affiliate code — try column_map first, then direct row access
-                            webmaster_code = detector.get_column(row, 'webmaster_code', None)
-                            if not webmaster_code:
-                                for col in ['webmaster_code', 'site_code']:
-                                    if col in row.index and pd.notna(row[col]) and row[col] != '':
-                                        webmaster_code = row[col]
-                                        break
-                            campaign = detector.get_column(row, 'campaign', None)
-                            if not campaign:
-                                if 'campaign' in row.index and pd.notna(row['campaign']):
-                                    campaign = row['campaign']
-                            
-                            # Pass ALL fields for complete fraud detection
-                            analysis = detector.analyze_email(
-                                row[email_col] if email_col else None,
-                                trans_datetime=detector.get_column(row, 'trans_datetime', None),
-                                pov_verified=detector.get_column(row, 'pov_verified', None),
-                                pov_verified_time=detector.get_column(row, 'pov_verified_time', None),
-                                ip_address=detector.get_column(row, 'ip', None),
-                                user_agent=detector.get_column(row, 'custom_http_user_agent', None),
-                                first_name=detector.get_column(row, 'first_name', None),
-                                user1=(
-                                    detector.get_column(row, 'custom_u1', None)
-                                    or detector.get_column(row, 'user1', None)
-                                ),
-                            )
-                            analysis['DUID'] = _duid
-                            analysis['payout_amount'] = detector.get_column(row, 'payout_amount', 0)
-                            analysis['data_type'] = data_type
-                            analysis['webmaster_code'] = webmaster_code
-                            analysis['campaign'] = campaign
-                            analysis['ad_id'] = detector.get_column(row, 'ad_id', None)
-                            # Store additional fields for re-analysis capability
-                            analysis['trans_datetime'] = detector.get_column(row, 'trans_datetime', None)
-                            analysis['pov_verified'] = detector.get_column(row, 'pov_verified', None)
-                            analysis['pov_verified_time'] = detector.get_column(row, 'pov_verified_time', None)
-                            analysis['user_agent'] = detector.get_column(row, 'custom_http_user_agent', None)
-                            # geo_country: prefer source row value, fall back to what the IP lookup found
-                            src_geo = detector.get_column(row, 'geo_country', None)
-                            analysis['geo_country'] = src_geo or analysis.get('geo_country')
-                            analysis['ip'] = detector.get_column(row, 'ip', None)
-                            analysis['first_name'] = detector.get_column(row, 'first_name', None)
-                            # custom_u1: paid uses 'custom_u1', free uses 'user1'
-                            analysis['custom_u1'] = (
-                                detector.get_column(row, 'custom_u1', None) or
-                                detector.get_column(row, 'user1', None)
-                            )
-                            results.append(analysis)
-                            
-                            # Update progress every 100 records
-                            if processed % 100 == 0:
-                                base_progress = 50 if type_idx == 1 else 0
-                                record_progress = int((processed / total_records) * 50)
-                                _running_tasks['analysis']['progress'] = base_progress + record_progress
-                                _running_tasks['analysis']['records_processed'] = len(results)
-                        
-                        detector.apply_gender_concentration_to_results(results)
-                        detector.apply_sequential_email_to_results(results)
-                        detector.apply_affiliate_domain_concentration_to_results(results)
-                        # Save results
-                        db.save_fraud_results(results)
-                        
-                        # Mark as analyzed
-                        duids = [r['DUID'] for r in results if r.get('DUID') not in (None, '', 'N/A')]
-                        if duids:
-                            db.mark_as_analyzed(duids, data_type)
-                        
-                        results_summary[data_type] = len(results)
-                        results_summary['high_risk'] += sum(1 for r in results if r['risk_score'] >= high_th)
-                        
-                        # Log filtering stats
+                        # ============================================================
+                        # SHARED PIPELINE: preprocess + score + save
+                        # ============================================================
+                        from pipeline_analysis import analyze_dataframe
+
+                        def _progress_cb(processed, total, _type_idx=type_idx):
+                            base_progress = 50 if _type_idx == 1 else 0
+                            record_progress = int((processed / max(total, 1)) * 50)
+                            _running_tasks['analysis']['progress'] = base_progress + record_progress
+                            _running_tasks['analysis']['records_processed'] = processed
+
+                        summary = analyze_dataframe(
+                            db,
+                            config,
+                            data_type,
+                            df,
+                            min_duid=0,  # already filtered above
+                            skip_affiliate_codes=set(),  # already filtered above
+                            progress_cb=_progress_cb,
+                            mark_skipped_analyzed=True,
+                        )
+
+                        results_summary[data_type] = int(summary.get('analyzed') or 0)
+                        results_summary['high_risk'] += int(summary.get('high_risk') or 0)
+                        results_summary['house_skipped'] += int(summary.get('skipped') or 0)
+
                         if filter_affiliates or filter_campaigns:
-                            logger.info(f"{data_type}: Total records: {total_records}, Analyzed: {len(results)}")
-                    
+                            logger.info(
+                                f"{data_type}: Total records: {total_records}, "
+                                f"Analyzed: {summary.get('analyzed')}"
+                            )                    
                     _running_tasks['analysis'] = {
                         'status': 'completed',
                         'completed': datetime.now().isoformat(),

@@ -903,7 +903,17 @@ class Database:
             if batch_rows:
                 c.executemany(insert_sql, batch_rows)
 
-            # Backfill geo_country and ip from source tables for any rows still missing them
+            # geo_country / ip / custom_u1 are written at insert time by analyze_dataframe.
+            # Full-table backfills were removed from this hot path (Phase 2).
+            # Use backfill_fraud_result_enrichment_fields() for one-off repair jobs.
+
+    def backfill_fraud_result_enrichment_fields(self):
+        """
+        One-off repair: copy geo_country, ip, custom_u1 from free/paid into fraud_results
+        where those columns are still empty. Not called on every save.
+        """
+        with self.get_connection() as conn:
+            c = conn.cursor()
             try:
                 c.execute("""
                     UPDATE fraud_results
@@ -929,11 +939,6 @@ class Database:
                     WHERE (ip IS NULL OR ip = '')
                     AND EXISTS (SELECT 1 FROM free f WHERE f.duid = fraud_results.duid AND f.ip IS NOT NULL AND f.ip != '')
                 """)
-            except Exception as e:
-                logger.warning(f"geo_country/ip backfill skipped: {e}")
-
-            # Backfill custom_u1 (gender) from source tables for any rows still missing it
-            try:
                 c.execute("""
                     UPDATE fraud_results
                     SET custom_u1 = (SELECT p.custom_u1 FROM paid p WHERE p.duid = fraud_results.duid LIMIT 1)
@@ -949,7 +954,9 @@ class Database:
                     AND EXISTS (SELECT 1 FROM free f WHERE f.duid = fraud_results.duid AND f.user1 IS NOT NULL AND f.user1 != '')
                 """)
             except Exception as e:
-                logger.warning(f"custom_u1 backfill skipped: {e}")
+                logger.warning(f"fraud_results enrichment backfill skipped: {e}")
+                return 0
+            return c.rowcount
 
     # ── IP flag helpers ───────────────────────────────────────────────────────
 

@@ -145,9 +145,11 @@ class EmailFraudDetector:
         
         if self.config:
             config_scores = self.config.get('risk_scores', {})
+            if not isinstance(config_scores, dict):
+                config_scores = {}
             # Merge with defaults (config takes precedence)
             return {**defaults, **config_scores}
-        
+
         return defaults
     
     def get_risk_score(self, key):

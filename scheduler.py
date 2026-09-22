@@ -1537,25 +1537,22 @@ class FraudPipelineScheduler:
                             f'MCP reconciliation partial for: {", ".join(partial_days[:5])}'
                         )
 
-                # ── Step 2: Preprocess + Analyze ──────────────────────────────────
+                # ── Step 2: Preprocess + Analyze (shared pipeline) ────────────────
                 self._update_run(progress=50, step='Loading analysis modules…')
 
                 scripts_path = str(Path(__file__).parent / 'scripts')
                 if scripts_path not in sys.path:
                     sys.path.insert(0, scripts_path)
 
-                from email_fraud_detector import EmailFraudDetector
-                from data_preprocessor   import DataPreprocessor
                 import pandas as pd
                 import sqlite3
+                from pipeline_analysis import analyze_dataframe
 
-                preprocessor       = DataPreprocessor()
-                detector           = EmailFraudDetector(self.config)  # risk scores + whitelist from config
-                house_set          = self.config.get_affiliate_analysis_skip_codes_lower(
+                min_duid = int(self.config.get('min_duid_threshold', 0) or 0)
+                high_th = int(self.config.get_risk_threshold('high') or 50)
+                skip_codes = self.config.get_affiliate_analysis_skip_codes_lower(
                     include_house_in_analysis=False
                 )
-                min_duid           = int(self.config.get('min_duid_threshold', 0) or 0)
-                high_th            = int(self.config.get_risk_threshold('high') or 50)
 
                 for type_idx, data_type in enumerate(['free', 'paid']):
                     self._update_run(
@@ -1572,115 +1569,23 @@ class FraudPipelineScheduler:
                     if df.empty:
                         continue
 
-                    # Preprocess
-                    df, _ = preprocessor.preprocess_batch(df)
-
-                    # Normalize column names so detector.get_column works
-                    df = detector.normalize_column_names(df)
-                    detector.build_repeated_word_map(df)
-                    detector.build_geographic_cluster_maps(df)
-                    detector.build_shared_ip_map(df, db=self.db)
-                    detector.build_ip_velocity_map(df, db=self.db)
-                    detector.build_gender_concentration_map(df)
-                    detector.build_sequential_email_map(df)
-                    detector.build_affiliate_domain_concentration_map(df)
-
-                    email_col = detector.column_map.get('email')
-                    if not email_col or email_col not in df.columns:
-                        continue
-
-                    # Pre-resolve all column names once (avoid per-row get_column overhead)
-                    cm = detector.column_map
-                    col = {k: cm.get(k) for k in (
-                        'duid', 'webmaster_code', 'campaign', 'ad_id',
-                        'trans_datetime', 'pov_verified', 'pov_verified_time',
-                        'ip', 'custom_http_user_agent', 'first_name',
-                        'custom_u1', 'user1', 'payout_amount', 'geo_country',
-                    )}
-
-                    def _get(rec, key, default=None):
-                        c = col.get(key)
-                        if c and c in rec:
-                            v = rec[c]
-                            import math
-                            try:
-                                if v is None or (isinstance(v, float) and math.isnan(v)):
-                                    return default
-                            except TypeError:
-                                pass
-                            return v if v != '' else default
-                        return default
-
-                    results = []
-                    for rec in df.to_dict('records'):
-                        duid = _get(rec, 'duid')
-                        if duid is None or str(duid).strip() == '':
-                            continue
-
-                        if min_duid and duid:
-                            try:
-                                if int(duid) < min_duid:
-                                    continue
-                            except (ValueError, TypeError):
-                                pass
-
-                        wm_code = _get(rec, 'webmaster_code')
-                        if not wm_code:
-                            for c in ('webmaster_code', 'site_code'):
-                                if c in rec and rec[c] not in (None, '', 'nan'):
-                                    wm_code = rec[c]
-                                    break
-
-                        if house_set and wm_code and str(wm_code).lower() in house_set:
-                            continue
-
-                        email = rec.get(email_col)
-                        if not email or str(email).lower() in ('', 'nan', 'none'):
-                            continue
-
-                        campaign = _get(rec, 'campaign')
-
-                        analysis = detector.analyze_email(
-                            email,
-                            trans_datetime    = _get(rec, 'trans_datetime'),
-                            pov_verified      = _get(rec, 'pov_verified'),
-                            pov_verified_time = _get(rec, 'pov_verified_time'),
-                            ip_address        = _get(rec, 'ip'),
-                            user_agent        = _get(rec, 'custom_http_user_agent'),
-                            first_name        = _get(rec, 'first_name'),
-                            user1             = _get(rec, 'custom_u1') or _get(rec, 'user1'),
-                        )
-
-                        analysis['DUID']          = duid
-                        analysis['payout_amount'] = _get(rec, 'payout_amount', 0)
-                        analysis['data_type']     = data_type
-                        analysis['webmaster_code']= wm_code
-                        analysis['campaign']      = campaign
-                        analysis['ad_id']         = _get(rec, 'ad_id')
-                        analysis['trans_datetime']= _get(rec, 'trans_datetime')
-                        analysis['geo_country']   = _get(rec, 'geo_country') or analysis.get('geo_country')
-                        analysis['ip']            = _get(rec, 'ip')
-                        analysis['first_name']    = _get(rec, 'first_name')
-                        analysis['custom_u1']     = _get(rec, 'custom_u1') or _get(rec, 'user1')
-                        analysis['user_agent']    = _get(rec, 'custom_http_user_agent')
-
-                        results.append(analysis)
-                        if analysis.get('risk_score', 0) >= high_th:
-                            high_risk += 1
-
-                    if results:
-                        detector.apply_gender_concentration_to_results(results)
-                        detector.apply_sequential_email_to_results(results)
-                        detector.apply_affiliate_domain_concentration_to_results(results)
-                        self.db.save_fraud_results(results)
-                        duids = [r['DUID'] for r in results if r.get('DUID') not in (None, '', 'N/A')]
-                        if duids:
-                            self.db.mark_as_analyzed(duids, data_type)
-                        total_analyzed += len(results)
-                        logger.info(
-                            f"[{run_id}] Analyzed {data_type}: {len(results)} records, "
-                            f"{sum(1 for r in results if r.get('risk_score', 0) >= high_th)} high-risk"
-                        )
+                    summary = analyze_dataframe(
+                        self.db,
+                        self.config,
+                        data_type,
+                        df,
+                        min_duid=min_duid,
+                        skip_affiliate_codes=skip_codes,
+                        mark_skipped_analyzed=True,
+                    )
+                    analyzed_n = int(summary.get('analyzed') or 0)
+                    high_n = int(summary.get('high_risk') or 0)
+                    total_analyzed += analyzed_n
+                    high_risk += high_n
+                    logger.info(
+                        f"[{run_id}] Analyzed {data_type}: {analyzed_n} records, "
+                        f"{high_n} high-risk (threshold={high_th})"
+                    )
 
                 # ── Step 2b: Immediate drain for remaining unanalyzed rows in window ──
                 sched_cfg = self.config.get('scheduler', {}) or {}

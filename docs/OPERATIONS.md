@@ -93,6 +93,23 @@ Use **1 worker** with SQLite unless you understand write-lock contention; raise 
 
 Load balancers: point **liveness** at `/api/health/live` and **readiness** at `/api/health/ready`.
 
+Docker Compose / Portainer stacks include a **healthcheck** on the web service that hits `/api/health/live`. Prefer `ready` for deployment gates and load-balancer readiness; use `live` for container health so brief SQLite locks do not mark the container unhealthy.
+
+## Secrets and sessions
+
+| Variable | Notes |
+|----------|--------|
+| `FLASK_SECRET_KEY` | **Required in production** — signs Flask sessions and encrypted admin2 credentials in the cookie |
+| `REQUIRE_FLASK_SECRET_KEY=1` | Fail fast at startup if `FLASK_SECRET_KEY` is empty (enabled in prod compose) |
+| `SESSION_COOKIE_SECURE` / `TRUST_PROXY_HTTPS` | Set when serving over HTTPS so session cookies are marked Secure |
+| `SESSION_COOKIE_SAMESITE` | Default `Lax` |
+
+Rotating `FLASK_SECRET_KEY` invalidates all existing admin2 sessions (users must sign in again).
+
+## Job coordination (SQLite)
+
+Web manual fetch/analysis/enrichment and the scheduler share a named SQLite lock (`job_locks` table, name=`pipeline`). Concurrent starts return **HTTP 409**. Stuck `pipeline_runs` rows older than `scheduler.stale_run_hours` (default 12) are marked failed on web/scheduler boot.
+
 ## Backups (SQLite)
 
 Use the online backup script (works with WAL):

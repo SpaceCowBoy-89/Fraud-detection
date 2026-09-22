@@ -1,9 +1,9 @@
+# Paste into Portainer → Stacks → Add stack (environment: admin3-ord)
+# Set Environment variables from your local .env (see deploy/ADMIN3_ORD_PORTAINER.md)
+
 services:
-  # Dashboard + API only. Pipeline scheduling runs in the `scheduler` service.
-  # Image: fraud-detection (DOCR e.g. registry.digitalocean.com/<registry>/fraud-detection:<tag>)
   web:
-    build: .
-    image: fraud-detection:${IMAGE_TAG:-latest}
+    image: registry.digitalocean.com/gpdocker/fraud-detection:${IMAGE_TAG:-latest}
     ports:
       - "${PORT:-5050}:5050"
     environment:
@@ -11,18 +11,20 @@ services:
       HOST: "0.0.0.0"
       DB_PATH: /data/affiliate_data.db
       SKIP_EMBEDDED_SCHEDULER: "1"
-      FRAUD_DETECTION_API_KEY: ${FRAUD_DETECTION_API_KEY:-}
+      DEBUG: "0"
+      WEB_CONCURRENCY: "1"
+      GUNICORN_TIMEOUT: "120"
+      FLASK_SECRET_KEY: ${FLASK_SECRET_KEY}
+      REQUIRE_FLASK_SECRET_KEY: "1"
+      FRAUD_DETECTION_API_KEY: ${FRAUD_DETECTION_API_KEY}
       WEBHOOK_INGEST_TOKEN: ${WEBHOOK_INGEST_TOKEN:-}
-      DEBUG: ${DEBUG:-0}
-      WEB_CONCURRENCY: ${WEB_CONCURRENCY:-1}
-      GUNICORN_TIMEOUT: ${GUNICORN_TIMEOUT:-120}
-      FLASK_SECRET_KEY: ${FLASK_SECRET_KEY:-}
-      REQUIRE_FLASK_SECRET_KEY: ${REQUIRE_FLASK_SECRET_KEY:-0}
       ADMIN2_LOGIN_REQUIRED: ${ADMIN2_LOGIN_REQUIRED:-1}
       ADMIN_API_USERNAME: ${ADMIN_API_USERNAME:-}
       ADMIN_API_PASSWORD: ${ADMIN_API_PASSWORD:-}
-      LOG_TO_STDOUT_ONLY: ${LOG_TO_STDOUT_ONLY:-1}
-      LOG_FORMAT: ${LOG_FORMAT:-text}
+      LOG_TO_STDOUT_ONLY: "1"
+      LOG_FORMAT: text
+      SESSION_COOKIE_SECURE: ${SESSION_COOKIE_SECURE:-1}
+      TRUST_PROXY_HTTPS: ${TRUST_PROXY_HTTPS:-1}
     volumes:
       - fraud_db:/data
     restart: unless-stopped
@@ -34,16 +36,15 @@ services:
       start_period: 40s
 
   scheduler:
-    build: .
-    image: fraud-detection:${IMAGE_TAG:-latest}
+    image: registry.digitalocean.com/gpdocker/fraud-detection:${IMAGE_TAG:-latest}
     command: ["python", "scheduler.py"]
     environment:
       DB_PATH: /data/affiliate_data.db
-      FRAUD_DETECTION_API_KEY: ${FRAUD_DETECTION_API_KEY:-}
+      FRAUD_DETECTION_API_KEY: ${FRAUD_DETECTION_API_KEY}
       ADMIN_API_USERNAME: ${ADMIN_API_USERNAME:-}
       ADMIN_API_PASSWORD: ${ADMIN_API_PASSWORD:-}
-      LOG_TO_STDOUT_ONLY: ${LOG_TO_STDOUT_ONLY:-1}
-      LOG_FORMAT: ${LOG_FORMAT:-text}
+      LOG_TO_STDOUT_ONLY: "1"
+      LOG_FORMAT: text
     volumes:
       - fraud_db:/data
     restart: unless-stopped

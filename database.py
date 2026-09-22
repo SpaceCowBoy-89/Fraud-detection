@@ -342,6 +342,14 @@ class Database:
         )''')
         c.execute('CREATE INDEX IF NOT EXISTS idx_webhook_ingest_created ON webhook_ingest_log (created_at)')
 
+        # Cross-process named locks (web + scheduler share one SQLite file)
+        c.execute('''CREATE TABLE IF NOT EXISTS job_locks (
+            name TEXT PRIMARY KEY,
+            holder TEXT NOT NULL,
+            acquired_at TIMESTAMP NOT NULL,
+            meta TEXT
+        )''')
+
         # Create indexes for performance
         indexes = [
             'CREATE INDEX IF NOT EXISTS idx_paid_duid ON paid(duid)',
@@ -578,154 +586,148 @@ class Database:
 
     def insert_paid_records(self, records):
         """Insert paid transaction records"""
-        conn = sqlite3.connect(self.db_path)
-        c = conn.cursor()
-
         inserted = 0
         duplicates = 0
         errors = 0
 
-        for i, record in enumerate(records):
-            try:
-                # Validate record is a dict
-                if not isinstance(record, dict):
-                    logger.error(f"Record {i} is not a dict: {type(record)}")
+        with self.get_connection() as conn:
+            c = conn.cursor()
+
+            for i, record in enumerate(records):
+                try:
+                    # Validate record is a dict
+                    if not isinstance(record, dict):
+                        logger.error(f"Record {i} is not a dict: {type(record)}")
+                        errors += 1
+                        continue
+
+                    # Debug: log first record structure
+                    if i == 0:
+                        logger.info(f"First record keys: {list(record.keys())}")
+
+                    # Get DUID - try multiple field names
+                    duid = self._get_field(record, 'duid', 'DUID', 'Duid')
+                    if not duid:
+                        logger.warning(f"Record {i} has no DUID, skipping")
+                        errors += 1
+                        continue
+
+                    c.execute('''INSERT INTO paid (
+                        duid, email, trans_datetime, campaign, ad_id, sale_amount,
+                        payout_amount, first_name, last_name, zip, ip, geo_country,
+                        custom_u1, custom_http_user_agent, proc_name,
+                        processor_subscriber_id, credit_count, credit_amount,
+                        chargeback_count, chargeback_amount, ref_url,
+                        webmaster_code, webmaster_id
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                    (
+                        duid,
+                        self._get_field(record, 'email', 'Email'),
+                        self._get_field(record, 'trans_datetime', 'Transaction Date Time', 'trans_date'),
+                        self._get_field(record, 'campaign', 'Campaign'),
+                        self._get_field(record, 'ad', 'ad_id', 'Ad ID'),
+                        self._get_float(record, 'sale_amt', 'Sale Amount'),
+                        self._get_float(record, 'payout', 'payout_amount', 'Payout Amount'),
+                        self._get_field(record, 'first_name', 'First Name'),
+                        self._get_field(record, 'last_name', 'Last Name'),
+                        self._get_field(record, 'zip', 'Zip'),
+                        self._get_field(record, 'ip', 'IP Address'),
+                        self._get_field(record, 'geo_country_code', 'Geo Country'),
+                        self._get_field(record, 'user1', 'User1 (user1)', 'custom_u1'),
+                        self._get_field(record, 'CUSTOM_http_user_agent', 'HTTP User Agent'),
+                        self._get_field(record, 'proc_name', 'Processor Name'),
+                        self._get_field(record, 'proc_subscriber_id', 'Processor Subscriber ID'),
+                        self._get_int(record, 'credit_count', 'Credit Count'),
+                        self._get_float(record, 'credit_amount', 'Credit Amount'),
+                        self._get_int(record, 'chargeback_count', 'Chargeback Count'),
+                        self._get_float(record, 'chargeback_amount', 'Chargeback Amount'),
+                        self._get_field(record, 'ref_url', 'Referer'),
+                        self._get_field(record, 'webmaster_code', 'Webmaster Code'),
+                        self._get_field(record, 'webmaster_id', 'Webmaster ID')
+                    ))
+                    inserted += 1
+                except sqlite3.IntegrityError:
+                    duplicates += 1
+                    continue
+                except Exception as e:
+                    logger.error(f"Error inserting record {i}: {e}")
+                    logger.error(f"Record type: {type(record)}, content: {record}")
                     errors += 1
                     continue
-
-                # Debug: log first record structure
-                if i == 0:
-                    logger.info(f"First record keys: {list(record.keys())}")
-
-                # Get DUID - try multiple field names
-                duid = self._get_field(record, 'duid', 'DUID', 'Duid')
-                if not duid:
-                    logger.warning(f"Record {i} has no DUID, skipping")
-                    errors += 1
-                    continue
-
-                c.execute('''INSERT INTO paid (
-                    duid, email, trans_datetime, campaign, ad_id, sale_amount,
-                    payout_amount, first_name, last_name, zip, ip, geo_country,
-                    custom_u1, custom_http_user_agent, proc_name,
-                    processor_subscriber_id, credit_count, credit_amount,
-                    chargeback_count, chargeback_amount, ref_url,
-                    webmaster_code, webmaster_id
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
-                (
-                    duid,
-                    self._get_field(record, 'email', 'Email'),
-                    self._get_field(record, 'trans_datetime', 'Transaction Date Time', 'trans_date'),
-                    self._get_field(record, 'campaign', 'Campaign'),
-                    self._get_field(record, 'ad', 'ad_id', 'Ad ID'),
-                    self._get_float(record, 'sale_amt', 'Sale Amount'),
-                    self._get_float(record, 'payout', 'payout_amount', 'Payout Amount'),
-                    self._get_field(record, 'first_name', 'First Name'),
-                    self._get_field(record, 'last_name', 'Last Name'),
-                    self._get_field(record, 'zip', 'Zip'),
-                    self._get_field(record, 'ip', 'IP Address'),
-                    self._get_field(record, 'geo_country_code', 'Geo Country'),
-                    self._get_field(record, 'user1', 'User1 (user1)', 'custom_u1'),
-                    self._get_field(record, 'CUSTOM_http_user_agent', 'HTTP User Agent'),
-                    self._get_field(record, 'proc_name', 'Processor Name'),
-                    self._get_field(record, 'proc_subscriber_id', 'Processor Subscriber ID'),
-                    self._get_int(record, 'credit_count', 'Credit Count'),
-                    self._get_float(record, 'credit_amount', 'Credit Amount'),
-                    self._get_int(record, 'chargeback_count', 'Chargeback Count'),
-                    self._get_float(record, 'chargeback_amount', 'Chargeback Amount'),
-                    self._get_field(record, 'ref_url', 'Referer'),
-                    self._get_field(record, 'webmaster_code', 'Webmaster Code'),
-                    self._get_field(record, 'webmaster_id', 'Webmaster ID')
-                ))
-                inserted += 1
-            except sqlite3.IntegrityError:
-                duplicates += 1
-                continue
-            except Exception as e:
-                logger.error(f"Error inserting record {i}: {e}")
-                logger.error(f"Record type: {type(record)}, content: {record}")
-                errors += 1
-                continue
-
-        conn.commit()
-        conn.close()
 
         logger.info(f"Inserted {inserted} paid records, {duplicates} duplicates skipped, {errors} errors")
         return inserted, duplicates
 
     def insert_free_records(self, records):
         """Insert free signup (leads) records"""
-        conn = sqlite3.connect(self.db_path)
-        c = conn.cursor()
-
         inserted = 0
         duplicates = 0
         errors = 0
 
-        for i, record in enumerate(records):
-            try:
-                # Validate record is a dict
-                if not isinstance(record, dict):
-                    logger.error(f"Record {i} is not a dict: {type(record)}")
+        with self.get_connection() as conn:
+            c = conn.cursor()
+
+            for i, record in enumerate(records):
+                try:
+                    # Validate record is a dict
+                    if not isinstance(record, dict):
+                        logger.error(f"Record {i} is not a dict: {type(record)}")
+                        errors += 1
+                        continue
+
+                    # Debug: log first record structure
+                    if i == 0:
+                        logger.info(f"First record keys: {list(record.keys())}")
+
+                    # Get DUID - try multiple field names
+                    duid = self._get_field(record, 'duid', 'DUID', 'Duid')
+                    if not duid:
+                        logger.warning(f"Record {i} has no DUID, skipping")
+                        errors += 1
+                        continue
+
+                    # Handle POV verified - can be various formats
+                    pov_verified = self._get_field(record, 'pov_verified', 'POV Verified', default=0)
+                    if isinstance(pov_verified, str):
+                        pov_verified = pov_verified.lower() in ('1', 'true', 'yes')
+                    else:
+                        pov_verified = bool(pov_verified)
+
+                    c.execute('''INSERT INTO free (
+                        duid, email, username, site_code, tour_code, campaign, ad_id,
+                        trans_datetime, ip, geo_country, user1, payout_amount,
+                        custom_http_user_agent, pov_verified, pov_verified_time, ref_url,
+                        webmaster_code, webmaster_id
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                    (
+                        duid,
+                        self._get_field(record, 'email', 'Email'),
+                        self._get_field(record, 'username', 'Username'),
+                        self._get_field(record, 'site_code', 'Site Code'),
+                        self._get_field(record, 'tour_code', 'Tour Code'),
+                        self._get_field(record, 'campaign', 'Campaign'),
+                        self._get_field(record, 'ad', 'ad_id', 'Ad ID'),
+                        self._get_field(record, 'trans_datetime', 'Transaction Date Time', 'trans_date'),
+                        self._get_field(record, 'ip', 'IP Address'),
+                        self._get_field(record, 'geo_country_code', 'Geo Country'),
+                        self._get_field(record, 'user1', 'User1 (user1)', 'custom_u1'),
+                        self._get_float(record, 'payout', 'payout_amount', 'Payout Amount'),
+                        self._get_field(record, 'CUSTOM_http_user_agent', 'HTTP User Agent'),
+                        pov_verified,
+                        self._get_field(record, 'pov_verified_time', 'POV Verified Time'),
+                        self._get_field(record, 'ref_url', 'Referer'),
+                        self._get_field(record, 'webmaster_code', 'Webmaster Code'),
+                        self._get_field(record, 'webmaster_id', 'Webmaster ID')
+                    ))
+                    inserted += 1
+                except sqlite3.IntegrityError:
+                    duplicates += 1
+                    continue
+                except Exception as e:
+                    logger.error(f"Error inserting record {i}: {e}")
+                    logger.error(f"Record type: {type(record)}, content: {record}")
                     errors += 1
                     continue
-
-                # Debug: log first record structure
-                if i == 0:
-                    logger.info(f"First record keys: {list(record.keys())}")
-
-                # Get DUID - try multiple field names
-                duid = self._get_field(record, 'duid', 'DUID', 'Duid')
-                if not duid:
-                    logger.warning(f"Record {i} has no DUID, skipping")
-                    errors += 1
-                    continue
-
-                # Handle POV verified - can be various formats
-                pov_verified = self._get_field(record, 'pov_verified', 'POV Verified', default=0)
-                if isinstance(pov_verified, str):
-                    pov_verified = pov_verified.lower() in ('1', 'true', 'yes')
-                else:
-                    pov_verified = bool(pov_verified)
-
-                c.execute('''INSERT INTO free (
-                    duid, email, username, site_code, tour_code, campaign, ad_id,
-                    trans_datetime, ip, geo_country, user1, payout_amount,
-                    custom_http_user_agent, pov_verified, pov_verified_time, ref_url,
-                    webmaster_code, webmaster_id
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
-                (
-                    duid,
-                    self._get_field(record, 'email', 'Email'),
-                    self._get_field(record, 'username', 'Username'),
-                    self._get_field(record, 'site_code', 'Site Code'),
-                    self._get_field(record, 'tour_code', 'Tour Code'),
-                    self._get_field(record, 'campaign', 'Campaign'),
-                    self._get_field(record, 'ad', 'ad_id', 'Ad ID'),
-                    self._get_field(record, 'trans_datetime', 'Transaction Date Time', 'trans_date'),
-                    self._get_field(record, 'ip', 'IP Address'),
-                    self._get_field(record, 'geo_country_code', 'Geo Country'),
-                    self._get_field(record, 'user1', 'User1 (user1)', 'custom_u1'),
-                    self._get_float(record, 'payout', 'payout_amount', 'Payout Amount'),
-                    self._get_field(record, 'CUSTOM_http_user_agent', 'HTTP User Agent'),
-                    pov_verified,
-                    self._get_field(record, 'pov_verified_time', 'POV Verified Time'),
-                    self._get_field(record, 'ref_url', 'Referer'),
-                    self._get_field(record, 'webmaster_code', 'Webmaster Code'),
-                    self._get_field(record, 'webmaster_id', 'Webmaster ID')
-                ))
-                inserted += 1
-            except sqlite3.IntegrityError:
-                duplicates += 1
-                continue
-            except Exception as e:
-                logger.error(f"Error inserting record {i}: {e}")
-                logger.error(f"Record type: {type(record)}, content: {record}")
-                errors += 1
-                continue
-
-        conn.commit()
-        conn.close()
 
         logger.info(f"Inserted {inserted} free records, {duplicates} duplicates skipped, {errors} errors")
         return inserted, duplicates
@@ -1734,6 +1736,69 @@ class Database:
             conn.commit()
             return int(cur.rowcount)
 
+    def try_acquire_named_lock(self, name, holder, *, stale_hours=12, meta=None):
+        """
+        Atomically acquire a named cross-process lock (SQLite BEGIN IMMEDIATE).
+
+        Returns True if acquired (including takeover of a stale lock).
+        """
+        from datetime import datetime, timedelta
+        import json as _json
+
+        name = str(name)
+        holder = str(holder)
+        cutoff = (datetime.now() - timedelta(hours=float(stale_hours))).isoformat()
+        now = datetime.now().isoformat()
+        meta_json = None
+        if meta is not None:
+            try:
+                meta_json = _json.dumps(meta) if not isinstance(meta, str) else meta
+            except (TypeError, ValueError):
+                meta_json = str(meta)
+
+        conn = sqlite3.connect(self.db_path, timeout=30.0)
+        try:
+            conn.execute('PRAGMA journal_mode=WAL')
+            conn.execute('PRAGMA busy_timeout=30000')
+            conn.execute('BEGIN IMMEDIATE')
+            row = conn.execute(
+                'SELECT holder, acquired_at FROM job_locks WHERE name = ?',
+                (name,),
+            ).fetchone()
+            if row:
+                existing_holder, acquired_at = row
+                if acquired_at and acquired_at >= cutoff and existing_holder != holder:
+                    conn.rollback()
+                    return False
+                conn.execute(
+                    'UPDATE job_locks SET holder = ?, acquired_at = ?, meta = ? WHERE name = ?',
+                    (holder, now, meta_json, name),
+                )
+            else:
+                conn.execute(
+                    'INSERT INTO job_locks (name, holder, acquired_at, meta) VALUES (?, ?, ?, ?)',
+                    (name, holder, now, meta_json),
+                )
+            conn.commit()
+            return True
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+
+    def release_named_lock(self, name, holder=None):
+        """Release a named lock. If holder is set, only release when holders match."""
+        name = str(name)
+        with self.get_connection() as conn:
+            if holder is None:
+                conn.execute('DELETE FROM job_locks WHERE name = ?', (name,))
+            else:
+                conn.execute(
+                    'DELETE FROM job_locks WHERE name = ? AND holder = ?',
+                    (name, str(holder)),
+                )
+
     def get_daily_free_coverage(self, start_date, end_date):
         """
         Daily free-table row counts and distinct affiliate counts.
@@ -2250,6 +2315,61 @@ class Database:
                 'total_updated': updated_from_free + updated_from_paid
             }
 
+    def count_fraud_results(
+        self,
+        data_type=None,
+        min_risk=None,
+        max_risk=None,
+        exclude_reviewed=False,
+        outcome=None,
+        analyzed_date_from=None,
+        analyzed_date_to=None,
+    ):
+        """COUNT(*) matching get_fraud_results filters (no LIMIT)."""
+        params: list = []
+
+        if exclude_reviewed:
+            query = """
+                SELECT COUNT(*) FROM fraud_results fr
+                LEFT JOIN fraud_outcomes fo ON fr.duid = fo.duid
+                WHERE fo.duid IS NULL
+            """
+        elif outcome == '__any__':
+            query = """
+                SELECT COUNT(*) FROM fraud_results fr
+                INNER JOIN fraud_outcomes fo ON fr.duid = fo.duid
+                WHERE 1=1
+            """
+        elif outcome:
+            query = """
+                SELECT COUNT(*) FROM fraud_results fr
+                INNER JOIN fraud_outcomes fo ON fr.duid = fo.duid AND fo.outcome = ?
+                WHERE 1=1
+            """
+            params.append(outcome)
+        else:
+            query = "SELECT COUNT(*) FROM fraud_results fr WHERE 1=1"
+
+        if data_type:
+            query += " AND fr.data_type = ?"
+            params.append(data_type)
+        if min_risk is not None:
+            query += " AND fr.risk_score >= ?"
+            params.append(min_risk)
+        if max_risk is not None:
+            query += " AND fr.risk_score < ?"
+            params.append(max_risk)
+        if analyzed_date_from:
+            query += " AND DATE(fr.analyzed_at) >= DATE(?)"
+            params.append(analyzed_date_from)
+        if analyzed_date_to:
+            query += " AND DATE(fr.analyzed_at) <= DATE(?)"
+            params.append(analyzed_date_to)
+
+        with self.get_connection() as conn:
+            row = conn.execute(query, params).fetchone()
+            return int(row[0] if row else 0)
+
     def get_fraud_results(
         self,
         data_type=None,
@@ -2564,6 +2684,19 @@ class Database:
                 (webmaster_code,),
             )
             return cur.rowcount or 0
+
+    def count_pending_reviews(self, min_risk=50):
+        """Count unreviewed high-risk accounts (same WHERE as get_pending_reviews)."""
+        query = """
+            SELECT COUNT(*)
+            FROM fraud_results fr
+            LEFT JOIN fraud_outcomes fo ON fr.duid = fo.duid
+            WHERE fr.risk_score >= ?
+              AND fo.duid IS NULL
+        """
+        with self.get_connection() as conn:
+            row = conn.execute(query, [min_risk]).fetchone()
+            return int(row[0] if row else 0)
 
     def get_pending_reviews(self, min_risk=50, limit=50):
         """

@@ -1,0 +1,22 @@
+# Fraud Detection — GitLab CI
+stages:
+  - test
+
+variables:
+  PIP_DISABLE_PIP_VERSION_CHECK: "1"
+  PYTHONDONTWRITEBYTECODE: "1"
+  SKIP_EMBEDDED_SCHEDULER: "1"
+  LOG_TO_STDOUT_ONLY: "1"
+  FLASK_SECRET_KEY: "ci-test-secret-not-for-production"
+  ADMIN2_LOGIN_REQUIRED: "0"
+
+pytest:
+  stage: test
+  image: python:3.11-slim
+  before_script:
+    - pip install -r requirements.txt
+  script:
+    - python -m pytest tests/ -q --tb=short
+  rules:
+    - if: $CI_PIPELINE_SOURCE
+      when: always

@@ -153,6 +153,8 @@ def test_analysis_api_endpoints(tmp_path, monkeypatch):
     """Smoke test new /api/analysis/* routes."""
     monkeypatch.setenv('SKIP_EMBEDDED_SCHEDULER', '1')
     monkeypatch.setenv('LOG_TO_STDOUT_ONLY', '1')
+    monkeypatch.setenv('ADMIN2_LOGIN_REQUIRED', '0')
+    monkeypatch.setenv('FLASK_SECRET_KEY', 'test-secret-analysis-api')
 
     from logging_config import reset_logging_config, configure_logging
     reset_logging_config()

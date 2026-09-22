@@ -5,9 +5,6 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Fraud Detection — Command Center</title>
 <script src="https://cdn.jsdelivr.net/npm/apexcharts@3.45.1/dist/apexcharts.min.js"></script>
-<link rel="stylesheet" href="https://cdn.datatables.net/1.13.7/css/jquery.dataTables.min.css">
-<script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
-<script src="https://cdn.datatables.net/1.13.7/js/jquery.dataTables.min.js"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
@@ -36,22 +33,22 @@
 </div>
 
 <!-- ═══ EMBED MODE TOP NAV (shown when sidebar is hidden) ═══ -->
-<nav class="embed-topbar" id="embedTopbar">
-  <div class="embed-tab active" data-tab="overview">Overview <span class="embed-badge" id="embed-badge-high" style="display:none"></span></div>
-  <div class="embed-tab" data-tab="review">Review</div>
-  <div class="embed-tab" data-tab="reports">Accounts</div>
-  <div class="embed-tab" data-tab="flags">Flags</div>
-  <div class="embed-tab" data-tab="affiliates">Affiliates</div>
-  <div class="embed-tab" data-tab="campaigns">Campaigns</div>
-  <div class="embed-tab" data-tab="clusters">Clusters</div>
-  <div class="embed-tab" data-tab="temporal">Trends</div>
-  <div class="embed-tab" data-tab="anomaly">Analysis</div>
-  <div class="embed-tab" data-tab="eda">Data Explorer</div>
-  <div class="embed-tab" data-tab="settings" style="margin-left:auto;">⚙️ Settings</div>
+<nav class="embed-topbar" id="embedTopbar" aria-label="Dashboard sections">
+  <button type="button" class="embed-tab active" data-tab="overview" aria-current="page">Overview <span class="embed-badge" id="embed-badge-high" style="display:none"></span></button>
+  <button type="button" class="embed-tab" data-tab="review">Review</button>
+  <button type="button" class="embed-tab" data-tab="reports">Accounts</button>
+  <button type="button" class="embed-tab" data-tab="flags">Flags</button>
+  <button type="button" class="embed-tab" data-tab="affiliates">Affiliates</button>
+  <button type="button" class="embed-tab" data-tab="campaigns">Campaigns</button>
+  <button type="button" class="embed-tab" data-tab="clusters">Clusters</button>
+  <button type="button" class="embed-tab" data-tab="temporal">Trends</button>
+  <button type="button" class="embed-tab" data-tab="anomaly">Analysis</button>
+  <button type="button" class="embed-tab" data-tab="eda">Data Explorer</button>
+  <button type="button" class="embed-tab" data-tab="settings" style="margin-left:auto;">Settings</button>
 </nav>
 
 <!-- ═══ SIDEBAR ═══ -->
-<nav class="sidebar">
+<nav class="sidebar" aria-label="Main">
   <div class="sidebar-brand">
     <h1><span class="brand-dot"></span>FRAUD OPS</h1>
     <div class="brand-sub">Detection Center</div>
@@ -59,76 +56,76 @@
   <div class="sidebar-nav">
 
     <!-- 1. Overview -->
-    <div class="nav-item active" data-tab="overview">
-      <span class="nav-icon">◉</span>
+    <button type="button" class="nav-item active" data-tab="overview" aria-current="page">
+      <span class="nav-icon" aria-hidden="true">◉</span>
       <span class="nav-label">Overview</span>
       <span class="nav-badge" id="nav-badge-high" style="display:none"></span>
-    </div>
+    </button>
 
     <!-- 2. Accounts -->
     <div class="nav-section-label">Accounts</div>
-    <div class="nav-item" data-tab="review">
-      <span class="nav-icon">✓</span>
+    <button type="button" class="nav-item" data-tab="review">
+      <span class="nav-icon" aria-hidden="true">✓</span>
       <span class="nav-label">Review Queue</span>
       <span class="nav-item-sub">High risk · pending</span>
-    </div>
-    <div class="nav-item" data-tab="reports">
-      <span class="nav-icon">📋</span>
+    </button>
+    <button type="button" class="nav-item" data-tab="reports">
+      <span class="nav-icon" aria-hidden="true">📋</span>
       <span class="nav-label">All Accounts</span>
-    </div>
-    <div class="nav-item" data-tab="flags">
-      <span class="nav-icon">🚩</span>
+    </button>
+    <button type="button" class="nav-item" data-tab="flags">
+      <span class="nav-icon" aria-hidden="true">🚩</span>
       <span class="nav-label">Flags</span>
-    </div>
+    </button>
 
     <!-- 3. Investigation -->
     <div class="nav-section-label">Investigation</div>
-    <div class="nav-item" data-tab="affiliates">
-      <span class="nav-icon">⊞</span>
+    <button type="button" class="nav-item" data-tab="affiliates">
+      <span class="nav-icon" aria-hidden="true">⊞</span>
       <span class="nav-label">Affiliates</span>
-    </div>
-    <div class="nav-item" data-tab="campaigns">
-      <span class="nav-icon">📣</span>
+    </button>
+    <button type="button" class="nav-item" data-tab="campaigns">
+      <span class="nav-icon" aria-hidden="true">📣</span>
       <span class="nav-label">Campaigns</span>
-    </div>
-    <div class="nav-item" data-tab="clusters">
-      <span class="nav-icon">🔗</span>
+    </button>
+    <button type="button" class="nav-item" data-tab="clusters">
+      <span class="nav-icon" aria-hidden="true">🔗</span>
       <span class="nav-label">Clusters</span>
       <span class="nav-item-sub">IP · Billing</span>
-    </div>
+    </button>
 
     <!-- 4. Analytics -->
     <div class="nav-section-label">Analytics</div>
-    <div class="nav-item" data-tab="temporal">
-      <span class="nav-icon">📈</span>
+    <button type="button" class="nav-item" data-tab="temporal">
+      <span class="nav-icon" aria-hidden="true">📈</span>
       <span class="nav-label">Trends</span>
-    </div>
-    <div class="nav-item" data-tab="anomaly">
-      <span class="nav-icon">⏤</span>
+    </button>
+    <button type="button" class="nav-item" data-tab="anomaly">
+      <span class="nav-icon" aria-hidden="true">⏤</span>
       <span class="nav-label">Analysis</span>
       <span class="nav-item-sub">Action center · Rules · Patterns</span>
-    </div>
+    </button>
 
     <!-- 5. Data -->
     <div class="nav-section-label">Data</div>
-    <div class="nav-item" data-tab="eda">
-      <span class="nav-icon">🔍</span>
+    <button type="button" class="nav-item" data-tab="eda">
+      <span class="nav-icon" aria-hidden="true">🔍</span>
       <span class="nav-label">Data Explorer</span>
-    </div>
+    </button>
 
     <!-- 6. Settings (pinned to bottom) -->
-    <div class="nav-item" data-tab="settings" style="margin-top:auto;">
-      <span class="nav-icon">⚙️</span>
+    <button type="button" class="nav-item" data-tab="settings" style="margin-top:auto;">
+      <span class="nav-icon" aria-hidden="true">⚙️</span>
       <span class="nav-label">Settings</span>
       <span class="nav-item-sub">Config · Actions</span>
-    </div>
+    </button>
 
   </div>
   <div class="sidebar-footer">
-    <div class="keyboard-hint" onclick="openCommandPalette()">
+    <button type="button" class="keyboard-hint" onclick="openCommandPalette()" title="Open command palette">
       <span class="kbd">⌘</span><span class="kbd">K</span>
       <span>Quick actions</span>
-    </div>
+    </button>
     <button class="auto-refresh-toggle" id="autoRefreshBtn" title="Toggle auto-refresh (30s)">
       <span class="refresh-indicator"></span>
       <span>Auto-refresh</span>
@@ -2717,7 +2714,7 @@
   <div class="modal account-modal">
     <div class="modal-header">
       <h3 id="accountModalTitle">Account Details</h3>
-      <button class="modal-close" onclick="closeAccountModal()">&times;</button>
+      <button type="button" class="modal-close" onclick="closeAccountModal()" aria-label="Close">&times;</button>
     </div>
     <div class="modal-body" id="accountModalBody">
       <div class="loading-spinner">Loading account details...</div>
@@ -2730,7 +2727,7 @@
   <div class="modal">
     <div class="modal-header">
       <h3 id="outcomeModalTitle">Record Outcome</h3>
-      <button class="modal-close" onclick="closeModal()">&times;</button>
+      <button type="button" class="modal-close" onclick="closeModal()" aria-label="Close">&times;</button>
     </div>
     <div class="modal-body">
       <div class="modal-meta">
@@ -2767,16 +2764,21 @@
   <div class="shortcuts-panel" id="shortcutsPanel">
     <h4>Keyboard Shortcuts</h4>
     <div class="shortcut-row"><span>Overview</span><span class="kbd">1</span></div>
-    <div class="shortcut-row"><span>Affiliates</span><span class="kbd">2</span></div>
-    <div class="shortcut-row"><span>Effectiveness</span><span class="kbd">3</span></div>
-    <div class="shortcut-row"><span>Drift Monitor</span><span class="kbd">4</span></div>
-    <div class="shortcut-row"><span>Billing</span><span class="kbd">5</span></div>
-    <div class="shortcut-row"><span>Actions</span><span class="kbd">6</span></div>
-    <div class="shortcut-row"><span>Reports</span><span class="kbd">7</span></div>
+    <div class="shortcut-row"><span>All Accounts</span><span class="kbd">2</span></div>
+    <div class="shortcut-row"><span>Flags</span><span class="kbd">3</span></div>
+    <div class="shortcut-row"><span>Affiliates</span><span class="kbd">4</span></div>
+    <div class="shortcut-row"><span>Campaigns</span><span class="kbd">5</span></div>
+    <div class="shortcut-row"><span>Clusters</span><span class="kbd">6</span></div>
+    <div class="shortcut-row"><span>Trends</span><span class="kbd">7</span></div>
+    <div class="shortcut-row"><span>Analysis</span><span class="kbd">8</span></div>
+    <div class="shortcut-row"><span>Data Explorer</span><span class="kbd">9</span></div>
+    <div class="shortcut-row"><span>Settings</span><span class="kbd">0</span></div>
+    <div class="shortcut-row"><span>Review Queue</span><span class="kbd">G</span><span class="kbd">Q</span></div>
+    <div class="shortcut-row"><span>Command palette</span><span class="kbd">⌘</span><span class="kbd">K</span></div>
     <div class="shortcut-row"><span>Toggle theme</span><span class="kbd">T</span></div>
-    <div class="shortcut-row"><span>Toggle refresh</span><span class="kbd">R</span></div>
+    <div class="shortcut-row"><span>Refresh view</span><span class="kbd">R</span></div>
     <div class="shortcut-row"><span>Focus search</span><span class="kbd">/</span></div>
-    <div class="shortcut-row"><span>Close/back</span><span class="kbd">Esc</span></div>
+    <div class="shortcut-row"><span>Close / help</span><span class="kbd">Esc</span> / <span class="kbd">?</span></div>
   </div>
 </div>
 

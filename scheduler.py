@@ -429,6 +429,13 @@ class FraudPipelineScheduler:
             logger.warning('Startup catch-up skipped: API client not configured')
             _startup_catchup_armed = False
             return
+        try:
+            stale_hours = float((self.config.get('scheduler') or {}).get('stale_run_hours', 12) or 12)
+            n = self.db.fail_stale_pipeline_runs(stale_hours=stale_hours)
+            if n:
+                logger.info('Startup catch-up: cleared %s stale pipeline_runs', n)
+        except Exception as e:
+            logger.warning('fail_stale_pipeline_runs before catch-up: %s', e)
         if self._pipeline_running_in_db():
             logger.info('Startup catch-up skipped: pipeline_runs has status=running')
             return
@@ -1382,6 +1389,28 @@ class FraudPipelineScheduler:
             )
             return
 
+        stale_hours = float((self.config.get('scheduler') or {}).get('stale_run_hours', 12) or 12)
+        lock_holder = f"scheduler-{os.getpid()}-{trigger}"
+        db_lock = False
+        try:
+            db_lock = self.db.try_acquire_named_lock(
+                'pipeline',
+                lock_holder,
+                stale_hours=stale_hours,
+                meta={'source': trigger},
+            )
+        except Exception as e:
+            logger.warning('Named pipeline lock acquire failed: %s', e)
+            _pipeline_busy.release()
+            return
+        if not db_lock:
+            logger.warning(
+                "Pipeline skipped: DB job lock held "
+                f"(trigger={trigger!r})"
+            )
+            _pipeline_busy.release()
+            return
+
         try:
             if not self._wait_for_vpn(trigger):
                 logger.warning(
@@ -1834,6 +1863,10 @@ class FraudPipelineScheduler:
                         'error':   str(exc),
                     }
         finally:
+            try:
+                self.db.release_named_lock('pipeline', lock_holder)
+            except Exception as lock_err:
+                logger.warning('Failed to release pipeline named lock: %s', lock_err)
             _pipeline_busy.release()
 
     def _update_run(self, progress: int, step: str):
@@ -1856,6 +1889,13 @@ if __name__ == '__main__':
     _cfg = Config()
     _db_path = os.environ.get('DB_PATH') or _cfg.get('database_path', 'affiliate_data.db')
     _db = Database(_db_path)
+    try:
+        _stale = float((_cfg.get('scheduler') or {}).get('stale_run_hours', 12) or 12)
+        _n = _db.fail_stale_pipeline_runs(stale_hours=_stale)
+        if _n:
+            logger.info('Standalone scheduler boot: cleared %s stale pipeline_runs', _n)
+    except Exception as _e:
+        logger.warning('Standalone scheduler boot fail_stale: %s', _e)
     _key = _cfg.get_api_key()
     _api = APIClient(_key) if _key else None
     if not _api:

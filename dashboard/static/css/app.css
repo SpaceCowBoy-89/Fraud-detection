@@ -241,8 +241,11 @@ body.embed-mode .embed-topbar {
   padding: 14px 16px;
   font-size: 13px;
   font-weight: 500;
+  font-family: inherit;
   color: var(--text-secondary);
   cursor: pointer;
+  border: none;
+  background: transparent;
   border-bottom: 2px solid transparent;
   white-space: nowrap;
   transition: all 0.18s;
@@ -328,6 +331,11 @@ body.embed-mode .embed-topbar {
   color: var(--text-sidebar);
   font-size: 13px;
   font-weight: 500;
+  font-family: inherit;
+  text-align: left;
+  width: 100%;
+  border: none;
+  background: transparent;
   transition: all 0.18s ease;
   user-select: none;
   position: relative;
@@ -2855,55 +2863,7 @@ body.embed-mode .embed-topbar {
   padding-top: 10px;
 }
 
-/* ═══ DATATABLES ═══ */
-.dataTables_wrapper {
-  color: var(--text);
-  font-size: 13px;
-}
-.dataTables_wrapper table.dataTable {
-  border-collapse: collapse;
-  width: 100%;
-}
-.dataTables_wrapper table.dataTable thead th {
-  background: var(--bg-secondary);
-  color: var(--text);
-  border-bottom: 2px solid var(--border);
-  padding: 12px;
-  font-weight: 600;
-  text-align: left;
-}
-.dataTables_wrapper table.dataTable tbody td {
-  padding: 10px 12px;
-  border-bottom: 1px solid var(--border);
-  color: var(--text);
-}
-.dataTables_wrapper table.dataTable tbody tr:hover {
-  background: var(--bg-secondary);
-}
-.dataTables_wrapper .dataTables_filter input,
-.dataTables_wrapper .dataTables_length select {
-  background: var(--input-bg);
-  border: 1px solid var(--border);
-  color: var(--text);
-  padding: 6px 12px;
-  border-radius: 6px;
-}
-.dataTables_wrapper .dataTables_paginate .paginate_button {
-  background: var(--btn-secondary-bg);
-  border: 1px solid var(--border);
-  color: var(--text) !important;
-  padding: 6px 12px;
-  border-radius: 6px;
-  margin: 0 2px;
-}
-.dataTables_wrapper .dataTables_paginate .paginate_button.current {
-  background: var(--primary) !important;
-  color: white !important;
-  border-color: var(--primary);
-}
-.dataTables_wrapper .dataTables_info {
-  color: var(--text-secondary);
-}
+/* DataTables CDN removed — custom buildTable is used instead */
 
 /* ═══ ACCOUNT FRAUD WIDGET (for platform integration) ═══ */
 /*
@@ -3698,6 +3658,8 @@ body.embed-mode .embed-topbar {
   color: var(--text-sidebar);
   font-size: 11px;
   font-family: var(--sans);
+  width: 100%;
+  text-align: left;
   transition: all 0.2s ease;
   background: rgba(255,255,255,0.03);
   border: 1px solid rgba(255,255,255,0.05);

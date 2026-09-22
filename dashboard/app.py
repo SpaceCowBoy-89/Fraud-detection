@@ -58,6 +58,12 @@ from .admin_credentials import (
     session_auth_status,
     session_is_authenticated,
 )
+from .production_config import (
+    require_flask_secret,
+    session_cookie_settings,
+    warn_sqlite_concurrency,
+)
+from .api_errors import api_error
 
 # Suppress Flask dev server warning
 logging.getLogger('werkzeug').setLevel(logging.ERROR)
@@ -343,11 +349,13 @@ def create_app(db, config, api_client=None):
     """Flask app factory. Receives existing Database and Config instances."""
     app = Flask(__name__)
     app.config['JSON_SORT_KEYS'] = False
+    testing = bool(app.config.get('TESTING')) or bool(os.environ.get('PYTEST_CURRENT_TEST'))
+    secret = require_flask_secret(testing=testing)
     # Stable secret across gunicorn workers when set (recommended in Docker / multi-worker).
-    app.config['SECRET_KEY'] = (
-        (os.environ.get('FLASK_SECRET_KEY') or '').strip()
-        or secrets.token_hex(32)
-    )
+    app.config['SECRET_KEY'] = secret or secrets.token_hex(32)
+    for _ck, _cv in session_cookie_settings().items():
+        app.config[_ck] = _cv
+    warn_sqlite_concurrency()
 
     # ── Scheduler ────────────────────────────────────────────────────────────
     sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -386,6 +394,14 @@ def create_app(db, config, api_client=None):
             logger.info("Database WAL mode enabled")
     except Exception as e:
         logger.warning(f"Could not enable WAL mode: {e}")
+
+    try:
+        stale_hours = float((config.get('scheduler') or {}).get('stale_run_hours', 12) or 12)
+        n = db.fail_stale_pipeline_runs(stale_hours=stale_hours)
+        if n:
+            logger.info('Cleared %s stale pipeline_runs on startup (>%sh)', n, stale_hours)
+    except Exception as e:
+        logger.warning('fail_stale_pipeline_runs on startup: %s', e)
 
     # ==================== MIDDLEWARE ====================
 
@@ -441,11 +457,18 @@ def create_app(db, config, api_client=None):
                 response.headers['Cache-Control'] = 'private, max-age=30'
         return response
 
+    from werkzeug.exceptions import HTTPException
+
+    @app.errorhandler(HTTPException)
+    def handle_http_exception(e):
+        """Preserve 4xx/redirect semantics — do not fold into generic 500."""
+        return jsonify({'error': e.name or 'Error', 'code': e.code}), e.code
+
     @app.errorhandler(Exception)
     def handle_exception(e):
-        """Global error handler"""
+        """Global error handler — generic body outside DEBUG/TESTING."""
         logger.error(f"Unhandled error on {request.path}: {e}", exc_info=True)
-        return jsonify({'error': 'Internal server error', 'details': str(e)}), 500
+        return api_error('Internal server error', 500, details=e)
 
     @app.errorhandler(404)
     def not_found(e):
@@ -453,7 +476,7 @@ def create_app(db, config, api_client=None):
 
     @app.errorhandler(400)
     def bad_request(e):
-        return jsonify({'error': 'Bad request', 'details': str(e)}), 400
+        return api_error('Bad request', 400, details=e)
 
     # ==================== ROUTES ====================
 
@@ -572,13 +595,17 @@ def create_app(db, config, api_client=None):
             out['database'] = 'ok'
         except Exception as e:
             logger.error('Readiness DB check failed: %s', e, exc_info=True)
-            return jsonify({
-                'ready': False,
-                'check': 'ready',
-                'database': 'error',
-                'error': str(e),
-                'timestamp': datetime.now().isoformat(),
-            }), 503
+            return api_error(
+                'Database unavailable',
+                503,
+                details=e,
+                extra={
+                    'ready': False,
+                    'check': 'ready',
+                    'database': 'error',
+                    'timestamp': datetime.now().isoformat(),
+                },
+            )
 
         out['api_configured'] = app.api_client is not None
         out['admin_api_configured'] = _scheduler_admin_configured()
@@ -1149,6 +1176,14 @@ def create_app(db, config, api_client=None):
                 return jsonify({'error': 'Cannot combine exclude_reviewed with outcome filter'}), 400
             analyzed_date_from = request.args.get('analyzed_date_from', '').strip() or None
             analyzed_date_to = request.args.get('analyzed_date_to', '').strip() or None
+            total = db.count_fraud_results(
+                min_risk=min_risk,
+                max_risk=max_risk,
+                exclude_reviewed=exclude_reviewed,
+                outcome=outcome_arg,
+                analyzed_date_from=analyzed_date_from,
+                analyzed_date_to=analyzed_date_to,
+            )
             df = db.get_fraud_results(
                 min_risk=min_risk,
                 max_risk=max_risk,
@@ -1161,10 +1196,16 @@ def create_app(db, config, api_client=None):
             # Select safe columns that exist
             cols = [c for c in ['duid', 'email', 'risk_score', 'flags', 'payout_amount',
                                 'data_type', 'analyzed_at', 'webmaster_code', 'campaign'] if c in df.columns]
-            return jsonify(df[cols].fillna('').to_dict(orient='records'))
+            records = df[cols].fillna('').to_dict(orient='records')
+            return jsonify({
+                'records': records,
+                'total': int(total),
+                'limit': limit,
+                'truncated': int(total) > len(records),
+            })
         except Exception as e:
             logger.error(f"Error in /api/fraud-results: {e}")
-            return jsonify({'error': str(e)}), 500
+            return api_error('Failed to load fraud results', 500, details=e)
 
     @app.route('/api/affiliates')
     def api_affiliates():
@@ -2136,13 +2177,22 @@ def create_app(db, config, api_client=None):
     @app.route('/api/pending-reviews')
     def api_pending_reviews():
         try:
-            df = db.get_pending_reviews(min_risk=50, limit=50)
+            limit = max(1, min(request.args.get('limit', 200, type=int), 5000))
+            min_risk = request.args.get('min_risk', 50, type=int) or 50
+            total = db.count_pending_reviews(min_risk=min_risk)
+            df = db.get_pending_reviews(min_risk=min_risk, limit=limit)
             cols = [c for c in ['duid', 'email', 'risk_score', 'flags', 'payout_amount',
                                 'data_type', 'analyzed_at'] if c in df.columns]
-            return jsonify(df[cols].fillna('').to_dict(orient='records'))
+            records = df[cols].fillna('').to_dict(orient='records')
+            return jsonify({
+                'records': records,
+                'total': int(total),
+                'limit': limit,
+                'truncated': int(total) > len(records),
+            })
         except Exception as e:
             logger.error(f"Error in /api/pending-reviews: {e}")
-            return jsonify({'error': str(e)}), 500
+            return api_error('Failed to load pending reviews', 500, details=e)
 
     # ── BA FEATURE 1 + 2 + 3: Digest / Deltas / Backlog ──────────────────
     @app.route('/api/overview/digest')
@@ -2380,6 +2430,11 @@ def create_app(db, config, api_client=None):
         if _running_tasks.get('enrich', {}).get('status') == 'running':
             return jsonify({'error': 'Enrichment already running'}), 409
 
+        stale_hours = float((config.get('scheduler') or {}).get('stale_run_hours', 12) or 12)
+        lock_holder = f"web-enrich-{os.getpid()}"
+        if not db.try_acquire_named_lock('pipeline', lock_holder, stale_hours=stale_hours, meta={'source': 'manual_web_enrich'}):
+            return jsonify({'error': 'Pipeline already running (scheduler or another job holds the lock)'}), 409
+
         body = request.json or {}
         last_run_only = bool(body.get('last_run_only', False))
         force = bool(body.get('force', False))
@@ -2395,6 +2450,7 @@ def create_app(db, config, api_client=None):
             logger.info(f"Force re-enrich: reset {reset_count} accounts from last run")
         elif force and not last_run_only:
             # Full force not allowed — too destructive on large DBs
+            db.release_named_lock('pipeline', lock_holder)
             return jsonify({'error': 'Force re-enrich is only supported with "Last run only"'}), 400
 
         # Count how many will actually be processed
@@ -2404,6 +2460,7 @@ def create_app(db, config, api_client=None):
 
         enrich_client = _admin_client_for_request()
         if not enrich_client:
+            db.release_named_lock('pipeline', lock_holder)
             return jsonify({
                 'error': 'Admin2 not signed in. Use the login prompt or Settings → Admin platform API.',
             }), 401
@@ -2441,6 +2498,11 @@ def create_app(db, config, api_client=None):
                     'status': 'error',
                     'error': str(exc),
                 }
+            finally:
+                try:
+                    db.release_named_lock('pipeline', lock_holder)
+                except Exception as lock_err:
+                    logger.warning('Failed to release pipeline lock: %s', lock_err)
 
         threading.Thread(target=run_enrich, daemon=True).start()
         return jsonify({'status': 'started', 'total': actual_count, 'last_run_only': last_run_only})
@@ -4923,9 +4985,14 @@ def create_app(db, config, api_client=None):
         """Run fraud detection analysis"""
         global _running_tasks
         
-        # Check if already running
+        # Check if already running (in-process or cross-process lease)
         if _running_tasks.get('analysis', {}).get('status') == 'running':
             return jsonify({'error': 'Analysis already running'}), 409
+
+        stale_hours = float((config.get('scheduler') or {}).get('stale_run_hours', 12) or 12)
+        lock_holder = f"web-analysis-{os.getpid()}"
+        if not db.try_acquire_named_lock('pipeline', lock_holder, stale_hours=stale_hours, meta={'source': 'manual_web_analysis'}):
+            return jsonify({'error': 'Pipeline already running (scheduler or another job holds the lock)'}), 409
         
         try:
             data = request.get_json() or {}
@@ -4942,6 +5009,7 @@ def create_app(db, config, api_client=None):
                     datetime.strptime(start_date, '%Y-%m-%d')
                     datetime.strptime(end_date, '%Y-%m-%d')
                 except ValueError:
+                    db.release_named_lock('pipeline', lock_holder)
                     return jsonify({'error': 'Invalid date format. Use YYYY-MM-DD'}), 400
             
             # Extract filters
@@ -4954,8 +5022,10 @@ def create_app(db, config, api_client=None):
             
             # Validate filters
             if filter_affiliates and not isinstance(filter_affiliates, list):
+                db.release_named_lock('pipeline', lock_holder)
                 return jsonify({'error': 'filters.affiliates must be a list'}), 400
             if filter_campaigns and not isinstance(filter_campaigns, list):
+                db.release_named_lock('pipeline', lock_holder)
                 return jsonify({'error': 'filters.campaigns must be a list'}), 400
 
             analysis_admin_client = _admin_client_for_request()
@@ -4987,14 +5057,12 @@ def create_app(db, config, api_client=None):
                     # Use validated data types only
                     valid_types = ['free', 'paid']
                     import pandas as pd
-                    import sqlite3
                     for type_idx, data_type in enumerate(valid_types):
                         _running_tasks['analysis']['progress'] = int((type_idx / len(valid_types)) * 50)
                         _running_tasks['analysis']['current_type'] = data_type
                         
                         # Get data - use parameterized query via db method
                         if analyze_all:
-                            conn = sqlite3.connect(db.db_path)
                             # Safe: data_type is from hardcoded valid_types list
                             where_parts = []
                             params = []
@@ -5004,27 +5072,27 @@ def create_app(db, config, api_client=None):
                                 where_parts.append(db.SQL_TRANS_DATE_BETWEEN)
                                 params.extend([start_date, end_date])
 
-                            # Push affiliate filter into SQL when re-analyzing so we
-                            # don't load the entire table when only one affiliate is needed
-                            if filter_affiliates:
-                                aff_col_sql = next(
-                                    (c for c in ['webmaster_code', 'site_code']
-                                     if c in pd.read_sql_query(
-                                         f"PRAGMA table_info({data_type})", conn  # noqa: S608
-                                     )['name'].tolist()),
-                                    None
-                                )
-                                if aff_col_sql:
-                                    placeholders = ','.join('?' * len(filter_affiliates))
-                                    where_parts.append(f"LOWER({aff_col_sql}) IN ({placeholders})")
-                                    params.extend(a.lower() for a in filter_affiliates)
+                            with db.get_connection() as conn:
+                                # Push affiliate filter into SQL when re-analyzing so we
+                                # don't load the entire table when only one affiliate is needed
+                                if filter_affiliates:
+                                    aff_col_sql = next(
+                                        (c for c in ['webmaster_code', 'site_code']
+                                         if c in pd.read_sql_query(
+                                             f"PRAGMA table_info({data_type})", conn  # noqa: S608
+                                         )['name'].tolist()),
+                                        None
+                                    )
+                                    if aff_col_sql:
+                                        placeholders = ','.join('?' * len(filter_affiliates))
+                                        where_parts.append(f"LOWER({aff_col_sql}) IN ({placeholders})")
+                                        params.extend(a.lower() for a in filter_affiliates)
 
-                            query = f"SELECT * FROM {data_type}"  # noqa: S608
-                            if where_parts:
-                                query += " WHERE " + " AND ".join(where_parts)
+                                query = f"SELECT * FROM {data_type}"  # noqa: S608
+                                if where_parts:
+                                    query += " WHERE " + " AND ".join(where_parts)
 
-                            df = pd.read_sql_query(query, conn, params=params if params else None)
-                            conn.close()
+                                df = pd.read_sql_query(query, conn, params=params if params else None)
                         else:
                             df = db.get_unanalyzed_records(data_type)
                             
@@ -5246,6 +5314,11 @@ def create_app(db, config, api_client=None):
                 except Exception as e:
                     logger.error(f"Analysis error: {e}", exc_info=True)
                     _running_tasks['analysis'] = {'status': 'error', 'error': str(e), 'progress': 0}
+                finally:
+                    try:
+                        db.release_named_lock('pipeline', lock_holder)
+                    except Exception as lock_err:
+                        logger.warning('Failed to release pipeline lock: %s', lock_err)
             
             thread = threading.Thread(target=run_analysis, daemon=True)
             thread.start()
@@ -5253,8 +5326,12 @@ def create_app(db, config, api_client=None):
             return jsonify({'status': 'started', 'message': 'Analysis started in background'})
             
         except Exception as e:
+            try:
+                db.release_named_lock('pipeline', lock_holder)
+            except Exception:
+                pass
             logger.error(f"Error starting analysis: {e}")
-            return jsonify({'error': str(e)}), 500
+            return api_error('Failed to start analysis', 500, details=e)
 
     @app.route('/api/analysis-status')
     def api_analysis_status():
@@ -5273,6 +5350,11 @@ def create_app(db, config, api_client=None):
         # Check if already running
         if _running_tasks.get('fetch', {}).get('status') == 'running':
             return jsonify({'error': 'Fetch already running'}), 409
+
+        stale_hours = float((config.get('scheduler') or {}).get('stale_run_hours', 12) or 12)
+        lock_holder = f"web-fetch-{os.getpid()}"
+        if not db.try_acquire_named_lock('pipeline', lock_holder, stale_hours=stale_hours, meta={'source': 'manual_web_fetch'}):
+            return jsonify({'error': 'Pipeline already running (scheduler or another job holds the lock)'}), 409
         
         try:
             data = request.get_json() or {}
@@ -5280,14 +5362,17 @@ def create_app(db, config, api_client=None):
             
             # Validate data_type
             if not validate_data_type(data_type):
+                db.release_named_lock('pipeline', lock_holder)
                 return jsonify({'error': f'Invalid data_type. Must be one of: {", ".join(VALID_DATA_TYPES)}'}), 400
             
             # Validate and sanitize days
             try:
                 days = int(data.get('days', 7))
                 if days < 1 or days > 365:
+                    db.release_named_lock('pipeline', lock_holder)
                     return jsonify({'error': 'days must be between 1 and 365'}), 400
             except (ValueError, TypeError):
+                db.release_named_lock('pipeline', lock_holder)
                 return jsonify({'error': 'days must be a valid integer'}), 400
             
             end_date = datetime.now().strftime('%Y-%m-%d')
@@ -5299,12 +5384,14 @@ def create_app(db, config, api_client=None):
                     datetime.strptime(data['start_date'], '%Y-%m-%d')
                     start_date = data['start_date']
                 except ValueError:
+                    db.release_named_lock('pipeline', lock_holder)
                     return jsonify({'error': 'start_date must be in YYYY-MM-DD format'}), 400
             if data.get('end_date'):
                 try:
                     datetime.strptime(data['end_date'], '%Y-%m-%d')
                     end_date = data['end_date']
                 except ValueError:
+                    db.release_named_lock('pipeline', lock_holder)
                     return jsonify({'error': 'end_date must be in YYYY-MM-DD format'}), 400
             
             # Extract and validate filters
@@ -5405,6 +5492,11 @@ def create_app(db, config, api_client=None):
                 except Exception as e:
                     logger.error(f"Fetch error: {e}", exc_info=True)
                     _running_tasks['fetch'] = {'status': 'error', 'error': str(e), 'progress': 0}
+                finally:
+                    try:
+                        db.release_named_lock('pipeline', lock_holder)
+                    except Exception as lock_err:
+                        logger.warning('Failed to release pipeline lock: %s', lock_err)
             
             # Set status to running BEFORE starting thread to avoid race condition
             _running_tasks['fetch'] = {
@@ -5422,8 +5514,12 @@ def create_app(db, config, api_client=None):
             })
             
         except Exception as e:
+            try:
+                db.release_named_lock('pipeline', lock_holder)
+            except Exception:
+                pass
             logger.error(f"Error starting fetch: {e}")
-            return jsonify({'error': str(e)}), 500
+            return api_error('Failed to start fetch', 500, details=e)
 
     @app.route('/api/fetch-status')
     def api_fetch_status():

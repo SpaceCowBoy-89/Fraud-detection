@@ -303,9 +303,19 @@ const tabTitles = {
 function switchTab(tab) {
   currentTab = tab;
   // Sidebar items
-  document.querySelectorAll('.nav-item').forEach(n => n.classList.toggle('active', n.dataset.tab === tab));
+  document.querySelectorAll('.nav-item').forEach(n => {
+    const on = n.dataset.tab === tab;
+    n.classList.toggle('active', on);
+    if (on) n.setAttribute('aria-current', 'page');
+    else n.removeAttribute('aria-current');
+  });
   // Embed top nav tabs
-  document.querySelectorAll('.embed-tab').forEach(n => n.classList.toggle('active', n.dataset.tab === tab));
+  document.querySelectorAll('.embed-tab').forEach(n => {
+    const on = n.dataset.tab === tab;
+    n.classList.toggle('active', on);
+    if (on) n.setAttribute('aria-current', 'page');
+    else n.removeAttribute('aria-current');
+  });
   // Panels
   document.querySelectorAll('.tab-panel').forEach(p => p.classList.toggle('active', p.id === 'tab-' + tab));
   document.getElementById('pageTitle').textContent = tabTitles[tab] || tab;
@@ -321,6 +331,21 @@ function switchTab(tab) {
     }
   }
   loadTabData(tab);
+}
+
+/** Alias for inline handlers and older call sites. */
+function showTab(tab) {
+  switchTab(tab);
+}
+
+/** Alias — account modal opens via openAccountDetail. */
+function openAccountModal(duid) {
+  return openAccountDetail(duid);
+}
+
+/** Alias used by embedded fraud widget action buttons. */
+function recordOutcome(duid, outcome) {
+  return recordAccountOutcome(duid, outcome);
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -456,6 +481,9 @@ window.fraudDashboard = {
   enableEmbedMode,
   disableEmbedMode,
   switchTab,
+  showTab,
+  openAccountModal,
+  openAccountDetail,
   version: '2.0.0'
 };
 
@@ -644,7 +672,9 @@ function emptyState(icon, title, desc) {
   return `<div class="empty-state"><div class="empty-icon">${icon}</div><h3>${title}</h3><p>${desc}</p></div>`;
 }
 function errorState(title, desc, retry) {
-  return `<div class="error-state"><div class="error-icon">⚠</div><h3>${title}</h3><p>${desc}</p>${retry ? `<button class="btn btn-primary" onclick="${retry}">Retry</button>` : ''}</div>`;
+  const safeTitle = escapeHtml(title);
+  const safeDesc = escapeHtml(desc);
+  return `<div class="error-state"><div class="error-icon">⚠</div><h3>${safeTitle}</h3><p>${safeDesc}</p>${retry ? `<button class="btn btn-primary" onclick="${retry}">Retry</button>` : ''}</div>`;
 }
 function loading() { return '<div class="loading-spinner">Loading data…</div>'; }
 function truncate(s, n) { return s && s.length > n ? s.slice(0, n) + '…' : (s || '—'); }
@@ -655,6 +685,9 @@ function escapeHtml(s) {
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;');
+}
+function escapeAttr(s) {
+  return escapeHtml(s).replace(/'/g, '&#39;');
 }
 
 const CLUSTER_MODAL_PREVIEW_LIMIT = 25;
@@ -823,18 +856,27 @@ async function api(path, options = {}) {
   }
 }
 
-// ─── Keyboard Shortcuts ───
+// ─── Keyboard Shortcuts (single consolidated handler) ───
 function toggleShortcuts() {
   document.getElementById('shortcutsPanel').classList.toggle('open');
 }
 
+const TAB_KEY_MAP = {
+  '1': 'overview',  '2': 'reports',    '3': 'flags',
+  '4': 'affiliates','5': 'campaigns',  '6': 'clusters',
+  '7': 'temporal',  '8': 'anomaly',    '9': 'eda',    '0': 'settings'
+};
+
+let _gChordLastKey = '';
+let _gChordLastTime = 0;
+
 document.addEventListener('keydown', e => {
-  // Ignore if typing in input/textarea
-  if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT') {
+  // Ignore if typing in input/textarea/select (except Escape blur)
+  if (e.target.matches('input, textarea, select') || e.target.isContentEditable) {
     if (e.key === 'Escape') e.target.blur();
     return;
   }
-  
+
   // Close modals/panels on Escape
   if (e.key === 'Escape') {
     closeModal();
@@ -843,28 +885,49 @@ document.addEventListener('keydown', e => {
     hideSearchResults();
     closeCommandPalette();
     closeFabMenu();
-    document.getElementById('shortcutsPanel').classList.remove('open');
+    document.getElementById('shortcutsPanel')?.classList.remove('open');
     return;
   }
-  
-  // Number keys for tabs (use 0 for 10+)
-  const tabMap = {
-    '1': 'overview',  '2': 'reports',    '3': 'flags',
-    '4': 'affiliates','5': 'campaigns',  '6': 'clusters',
-    '7': 'temporal',  '8': 'anomaly',    '9': 'eda',    '0': 'settings'
-  };
-  if (tabMap[e.key]) {
-    switchTab(tabMap[e.key]);
+
+  // Number keys for tabs
+  if (TAB_KEY_MAP[e.key] && !e.metaKey && !e.ctrlKey && !e.altKey) {
+    switchTab(TAB_KEY_MAP[e.key]);
     return;
   }
-  
-  // Other shortcuts
-  switch (e.key.toLowerCase()) {
+
+  const now = Date.now();
+  const key = e.key.toLowerCase();
+
+  // G + key navigation chords (within 500ms)
+  if (_gChordLastKey === 'g' && now - _gChordLastTime < 500) {
+    const gMap = {
+      o: 'overview', q: 'review', a: 'affiliates',
+      c: 'campaigns', t: 'temporal', s: 'settings',
+      r: 'reports', f: 'flags',
+    };
+    if (gMap[key]) {
+      e.preventDefault();
+      switchTab(gMap[key]);
+    }
+    _gChordLastKey = '';
+    return;
+  }
+
+  switch (key) {
+    case 'g':
+      _gChordLastKey = 'g';
+      _gChordLastTime = now;
+      break;
     case 't':
-      toggleTheme();
+      if (!e.metaKey && !e.ctrlKey) toggleTheme();
       break;
     case 'r':
-      document.getElementById('autoRefreshBtn').click();
+      // Refresh current view (auto-refresh toggle is command palette / footer button)
+      if (!e.metaKey && !e.ctrlKey) {
+        clearApiCache();
+        loadTabData(currentTab);
+        showToast('Refreshed');
+      }
       break;
     case '/':
       e.preventDefault();
@@ -1144,27 +1207,30 @@ function filterTable(tableId, searchText, opts = {}) {
     if (el) el.textContent = `${filtered.length} accounts`;
   }
   
-  // Re-render table with filtered data
-  renderFilteredTable(tableId, filtered);
+  // Sort full filtered set, then paginate
+  const configs = _tableColumnConfigs();
+  const columns = configs[tableId]?.columns;
+  const sorted = columns ? sortRows(filtered, columns, sortState[tableId]) : filtered;
+  renderFilteredTable(tableId, sorted);
 }
 
-function renderFilteredTable(tableId, data) {
-  const configs = {
+function _tableColumnConfigs() {
+  return {
     hr: {
       wrap: 'highRiskTableWrap',
       columns: [
-        { key: 'duid', label: '☐', render: (v, row) => `<input type="checkbox" class="bulk-checkbox" data-duid="${v}" onclick="event.stopPropagation();toggleBulkSelect('${v}', this)" ${_bulkSelected.has(v) ? 'checked' : ''}>` },
-        { key: 'email', label: 'Email', hint: 'Email address on the analyzed record.' },
+        { key: 'duid', label: '☐', render: (v, row) => `<input type="checkbox" class="bulk-checkbox" data-duid="${escapeAttr(v)}" onclick="event.stopPropagation();toggleBulkSelect('${escapeAttr(v)}', this)" ${_bulkSelected.has(v) ? 'checked' : ''}>` },
+        { key: 'email', label: 'Email', hint: 'Email address on the analyzed record.', render: v => escapeHtml(truncate(v, 40)) },
         { key: 'risk_score', label: 'Risk', numeric: true, right: true, hint: 'Fraud model score from 0–100. 50+ is treated as high risk (you can change the cutoff in Settings).', render: v => riskBadge(v) },
         { key: 'payout_amount', label: 'Payout', numeric: true, right: true, hint: 'Payout tied to this row when the source file includes it.', render: v => fmtCur(v) },
         { key: 'webmaster_code', label: 'Affiliate', muted: true, hint: 'Affiliate / webmaster code for this account.', render: (v, row) => {
           const code = v || (row && row.webmaster_code) || '';
           if (!code) return '—';
           const pill = affiliateActionPillHtml(code);
-          if (!pill) return code;
-          return `<span style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;"><span>${code}</span>${pill}</span>`;
+          if (!pill) return escapeHtml(code);
+          return `<span style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;"><span>${escapeHtml(code)}</span>${pill}</span>`;
         } },
-        { key: 'flags', label: 'Flags', muted: true, hint: 'Short labels for rules that added risk (hover the … on a flag chip in other views for the full reason).', render: v => truncate(String(v), 40) }
+        { key: 'flags', label: 'Flags', muted: true, hint: 'Short labels for rules that added risk (hover the … on a flag chip in other views for the full reason).', render: v => escapeHtml(truncate(String(v), 40)) }
       ],
       opts: { clickable: true, onClick: 'openHighRiskModalByDuid', onClickKey: 'duid', emptyIcon: '⊘', emptyTitle: 'No matching accounts' }
     },
@@ -1173,7 +1239,7 @@ function renderFilteredTable(tableId, data) {
       columns: [
         { key: 'webmaster_code', label: 'Affiliate', hint: 'Affiliate code; click row to drill into accounts.', render: v => `
           <span style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
-            <span style="font-family:var(--mono);font-size:12px;">${v}</span>
+            <span style="font-family:var(--mono);font-size:12px;">${escapeHtml(v)}</span>
             ${affiliateActionPillHtml(v)}
             <a href="/affiliate/${encodeURIComponent(v)}" target="_blank"
                onclick="event.stopPropagation()"
@@ -1196,7 +1262,7 @@ function renderFilteredTable(tableId, data) {
     drill: {
       wrap: 'drillTableWrap',
       columns: [
-        { key: 'email', label: 'Email', render: v => truncate(v, 36) },
+        { key: 'email', label: 'Email', render: v => escapeHtml(truncate(v, 36)) },
         { key: 'risk_score', label: 'Risk', numeric: true, right: true, hint: 'Model risk score at last analysis.', render: v => riskBadge(v) },
         { key: 'payout_amount', label: 'Payout', numeric: true, right: true, hint: 'Payout on the source record.', render: v => fmtCur(v) },
         { key: 'review_outcome', label: 'Review', muted: true, hint: 'Manual review outcome. Extra $ shows confirmed-fraud payout when stored.', render: (v, row) => {
@@ -1205,17 +1271,17 @@ function renderFilteredTable(tableId, data) {
           const lbl = m[v] || String(v);
           const cf = row && row.confirmed_fraud_payout;
           const extra = (v === 'confirmed_fraud' && cf != null && Number(cf) > 0) ? ` ${fmtCur(cf)}` : '';
-          return lbl + extra;
+          return escapeHtml(lbl) + extra;
         } },
-        { key: 'campaign', label: 'Campaign', muted: true },
-        { key: 'flags', label: 'Flags', muted: true, hint: 'Rules that flagged this account.', render: v => truncate(String(v), 40) }
+        { key: 'campaign', label: 'Campaign', muted: true, render: v => escapeHtml(v || '—') },
+        { key: 'flags', label: 'Flags', muted: true, hint: 'Rules that flagged this account.', render: v => escapeHtml(truncate(String(v), 40)) }
       ],
       opts: { clickable: true, onClick: 'openDrillModal', emptyIcon: '⊘', emptyTitle: 'No matching accounts' }
     },
     camp: {
       wrap: 'campaignsTableWrap',
       columns: [
-        { key: 'campaign', label: 'Campaign', hint: 'Campaign name on analyzed records.', render: v => truncate(v, 30) },
+        { key: 'campaign', label: 'Campaign', hint: 'Campaign name on analyzed records.', render: v => escapeHtml(truncate(v, 30)) },
         { key: 'total_accounts', label: 'Total', numeric: true, right: true, hint: 'All accounts in this campaign in fraud_results.', render: v => fmt(v) },
         { key: 'high_risk_count', label: 'High', numeric: true, right: true, hint: 'Count with risk ≥ high-risk threshold.', render: v => `<span style="color:var(--risk-high)">${fmt(v)}</span>` },
         { key: 'high_risk_pct', label: 'High %', numeric: true, right: true, hint: 'High-risk ÷ total × 100. Color bands: ~15% / 30% UI thresholds.', render: v => {
@@ -1231,16 +1297,19 @@ function renderFilteredTable(tableId, data) {
     campDrill: {
       wrap: 'campDrillTableWrap',
       columns: [
-        { key: 'email', label: 'Email', render: v => truncate(v, 36) },
+        { key: 'email', label: 'Email', render: v => escapeHtml(truncate(v, 36)) },
         { key: 'risk_score', label: 'Risk', numeric: true, right: true, hint: 'Model risk score.', render: v => riskBadge(v) },
-        { key: 'webmaster_code', label: 'Affiliate', muted: true },
+        { key: 'webmaster_code', label: 'Affiliate', muted: true, render: v => escapeHtml(v || '—') },
         { key: 'payout_amount', label: 'Payout', numeric: true, right: true, hint: 'Payout on record.', render: v => fmtCur(v) },
-        { key: 'flags', label: 'Flags', muted: true, hint: 'Detection flags fired.', render: v => truncate(String(v), 40) }
+        { key: 'flags', label: 'Flags', muted: true, hint: 'Detection flags fired.', render: v => escapeHtml(truncate(String(v), 40)) }
       ],
       opts: { clickable: true, onClick: 'openCampDrillModalByDuid', onClickKey: 'duid', emptyIcon: '⊘', emptyTitle: 'No accounts' }
     }
   };
+}
 
+function renderFilteredTable(tableId, data) {
+  const configs = _tableColumnConfigs();
   const config = configs[tableId];
   if (!config) return;
 
@@ -1258,7 +1327,7 @@ function renderFilteredTable(tableId, data) {
     rows = pageMeta.pageRows;
   }
 
-  document.getElementById(config.wrap).innerHTML = buildTable(tableId, config.columns, rows, config.opts);
+  document.getElementById(config.wrap).innerHTML = buildTable(tableId, config.columns, rows, { ...config.opts, alreadySorted: true });
   if (pageMeta) {
     updateTablePagination(tableId, pageMeta.page, pageMeta.totalPages, pageMeta.totalRows, pageMeta.pageSize);
   }
@@ -1276,7 +1345,31 @@ function showToast(msg, type = 'success') {
 
 // ─── Outcome Modal ───
 let _modalDuid = null;
+let _modalFocusReturn = null;
+
+function _focusFirstIn(el) {
+  if (!el) return;
+  const focusable = el.querySelector('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])');
+  (focusable || el).focus?.();
+}
+
+function _trapFocus(e, modalEl) {
+  if (e.key !== 'Tab' || !modalEl?.classList.contains('open')) return;
+  const nodes = modalEl.querySelectorAll('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])');
+  if (!nodes.length) return;
+  const first = nodes[0];
+  const last = nodes[nodes.length - 1];
+  if (e.shiftKey && document.activeElement === first) {
+    e.preventDefault();
+    last.focus();
+  } else if (!e.shiftKey && document.activeElement === last) {
+    e.preventDefault();
+    first.focus();
+  }
+}
+
 function openOutcomeModal(duid, email) {
+  _modalFocusReturn = document.activeElement;
   _modalDuid = duid;
   document.getElementById('modalDuid').textContent = duid || '—';
   document.getElementById('modalEmail').textContent = email || '—';
@@ -1285,10 +1378,15 @@ function openOutcomeModal(duid, email) {
   document.querySelectorAll('.outcome-opt').forEach(o => o.classList.remove('selected'));
   document.getElementById('outcomeSubmit').disabled = true;
   document.getElementById('outcomeModal').classList.add('open');
+  _focusFirstIn(document.getElementById('outcomeModal'));
 }
 function closeModal() {
   document.getElementById('outcomeModal').classList.remove('open');
   _modalDuid = null;
+  if (_modalFocusReturn?.focus) {
+    try { _modalFocusReturn.focus(); } catch (_) { /* ignore */ }
+  }
+  _modalFocusReturn = null;
 }
 document.querySelectorAll('#outcomeOptions .outcome-opt').forEach(opt => {
   opt.addEventListener('click', () => {
@@ -1300,6 +1398,15 @@ document.querySelectorAll('#outcomeOptions .outcome-opt').forEach(opt => {
 });
 document.getElementById('outcomeModal').addEventListener('click', e => {
   if (e.target === e.currentTarget) closeModal();
+});
+document.getElementById('outcomeModal')?.addEventListener('keydown', e => {
+  _trapFocus(e, document.getElementById('outcomeModal'));
+});
+document.getElementById('accountModal')?.addEventListener('keydown', e => {
+  _trapFocus(e, document.getElementById('accountModal'));
+});
+document.getElementById('accountModal')?.addEventListener('click', e => {
+  if (e.target === e.currentTarget) closeAccountModal();
 });
 async function submitOutcome() {
   const outcome = document.querySelector('#outcomeOptions input:checked')?.value;
@@ -1329,6 +1436,8 @@ async function submitOutcome() {
 
 // ─── Pending review inline actions ───
 let _pendingData = [];
+let _pendingTotal = 0;
+let _highRiskTotal = 0;
 async function pendingAction(idx, outcome) {
   const row = _pendingData[idx];
   if (!row) return;
@@ -1352,6 +1461,20 @@ async function pendingAction(idx, outcome) {
 }
 
 // ─── Sortable Table Builder ───
+function sortRows(rows, columns, state) {
+  if (!rows || !columns || !state || state.col == null) return rows || [];
+  const col = columns[state.col];
+  if (!col) return rows;
+  return [...rows].sort((a, b) => {
+    let va = a[col.key], vb = b[col.key];
+    if (col.numeric) { va = Number(va) || 0; vb = Number(vb) || 0; }
+    else { va = String(va || '').toLowerCase(); vb = String(vb || '').toLowerCase(); }
+    if (va < vb) return state.dir === 'asc' ? -1 : 1;
+    if (va > vb) return state.dir === 'asc' ? 1 : -1;
+    return 0;
+  });
+}
+
 function buildTable(id, columns, rows, opts = {}) {
   if (!rows || rows.length === 0) {
     return emptyState(opts.emptyIcon || '◌', opts.emptyTitle || 'No data', opts.emptyDesc || 'No records available yet.');
@@ -1360,16 +1483,8 @@ function buildTable(id, columns, rows, opts = {}) {
   if (!sortState[id]) sortState[id] = { col: null, dir: 'desc' };
 
   const state = sortState[id];
-  if (state.col !== null) {
-    const col = columns[state.col];
-    rows = [...rows].sort((a, b) => {
-      let va = a[col.key], vb = b[col.key];
-      if (col.numeric) { va = Number(va) || 0; vb = Number(vb) || 0; }
-      else { va = String(va || '').toLowerCase(); vb = String(vb || '').toLowerCase(); }
-      if (va < vb) return state.dir === 'asc' ? -1 : 1;
-      if (va > vb) return state.dir === 'asc' ? 1 : -1;
-      return 0;
-    });
+  if (!opts.alreadySorted && state.col !== null) {
+    rows = sortRows(rows, columns, state);
   }
 
   let html = `<table class="data-table${opts.noSort ? ' no-sort' : ''}"><thead><tr>`;
@@ -1392,7 +1507,7 @@ function buildTable(id, columns, rows, opts = {}) {
     }
     html += `<tr class="${cls}" ${click}>`;
     columns.forEach(col => {
-      const val = col.render ? col.render(row[col.key], row) : (row[col.key] ?? '—');
+      const val = col.render ? col.render(row[col.key], row) : escapeHtml(row[col.key] ?? '—');
       html += `<td class="${col.right ? 'right' : ''} ${col.muted ? 'muted' : ''}">${val}</td>`;
     });
     html += '</tr>';
@@ -1401,14 +1516,37 @@ function buildTable(id, columns, rows, opts = {}) {
   return html;
 }
 
-// Global sort handler
+/** Re-render a table from cache after sort — no network fetch. */
+function rerenderTable(tableId) {
+  if (tableId === 'pend') {
+    renderPendingTable();
+    return;
+  }
+  if (tableId === 'reports') {
+    renderReportsTable();
+    return;
+  }
+  const searchMap = {
+    hr: 'searchHighRisk',
+    aff: 'searchAffiliates',
+    camp: 'searchCampaigns',
+    campDrill: 'searchCampDrill',
+    drill: 'searchDrill',
+  };
+  const searchEl = searchMap[tableId] ? document.getElementById(searchMap[tableId]) : null;
+  if (rawDataCache[tableId]) {
+    filterTable(tableId, searchEl?.value || '', { resetPage: false });
+  }
+}
+
+// Global sort handler — local re-render only
 document.addEventListener('click', e => {
   if (e.target.closest('.th-info')) return;
   const th = e.target.closest('th[data-table-id]');
   if (!th) return;
   if (th.closest('.data-table.no-sort')) return;
   const id = th.dataset.tableId;
-  const col = parseInt(th.dataset.col);
+  const col = parseInt(th.dataset.col, 10);
   if (!sortState[id]) sortState[id] = { col: null, dir: 'desc' };
   if (sortState[id].col === col) {
     sortState[id].dir = sortState[id].dir === 'asc' ? 'desc' : 'asc';
@@ -1416,7 +1554,7 @@ document.addEventListener('click', e => {
     sortState[id].col = col;
     sortState[id].dir = 'desc';
   }
-  loadTabData(currentTab);
+  rerenderTable(id);
 });
 
 // ─── Data cache for drill-down ───
@@ -1502,7 +1640,7 @@ async function performSearch(query) {
   const res = await api(`/api/search?q=${encodeURIComponent(query)}&limit=20&scope=${scope}`);
   
   if (res.error) {
-    resultsEl.innerHTML = `<div class="search-no-results">Error: ${res.error}</div>`;
+    resultsEl.innerHTML = `<div class="search-no-results">Error: ${escapeHtml(res.error)}</div>`;
     return;
   }
   
@@ -1518,10 +1656,10 @@ async function performSearch(query) {
       const fraudPct = r.total_accounts > 0 ? Math.round(100 * r.high_risk_count / r.total_accounts) : 0;
       return `
         <div class="search-result-item" onclick="hideSearchResults();window.location.href='/affiliate/${encodeURIComponent(r.webmaster_code)}'" title="Open affiliate detail">
-          <div class="search-result-email">${r.webmaster_code}</div>
+          <div class="search-result-email">${escapeHtml(r.webmaster_code)}</div>
           <div class="search-result-meta">
             <span class="search-result-risk ${fraudPct >= 50 ? '' : fraudPct >= 25 ? 'medium' : 'low'}">Fraud: ${fraudPct}%</span>
-            <span>${r.total_accounts.toLocaleString()} accounts</span>
+            <span>${Number(r.total_accounts || 0).toLocaleString()} accounts</span>
             <span>$${r.total_payout?.toFixed(2) ?? '—'} payout</span>
             <span style="opacity:0.5">affiliate</span>
           </div>
@@ -1534,7 +1672,7 @@ async function performSearch(query) {
           <div class="search-result-email">${escapeHtml(r.campaign)}</div>
           <div class="search-result-meta">
             <span class="search-result-risk ${fraudPct >= 50 ? '' : fraudPct >= 25 ? 'medium' : 'low'}">Fraud: ${fraudPct}%</span>
-            <span>${r.total_accounts.toLocaleString()} accounts</span>
+            <span>${Number(r.total_accounts || 0).toLocaleString()} accounts</span>
             <span>$${r.total_payout?.toFixed(2) ?? '—'} payout</span>
             <span style="opacity:0.5">campaign</span>
           </div>
@@ -1542,17 +1680,17 @@ async function performSearch(query) {
     }
     // Account result (default)
     return `
-      <div class="search-result-item" onclick="openAccountDetail('${r.duid}')" title="Click to view account detail">
-        <div class="search-result-email">${r.email || 'No email'}</div>
+      <div class="search-result-item" onclick="openAccountDetail('${escapeAttr(r.duid)}')" title="Click to view account detail">
+        <div class="search-result-email">${escapeHtml(r.email || 'No email')}</div>
         <div class="search-result-meta">
           <span class="search-result-risk ${r.risk_score >= 50 ? '' : r.risk_score >= 25 ? 'medium' : 'low'}">
-            ${r.risk_score != null ? `Risk: ${r.risk_score}` : 'Not analyzed'}
+            ${r.risk_score != null ? `Risk: ${escapeHtml(r.risk_score)}` : 'Not analyzed'}
           </span>
           ${r.webmaster_code
-            ? `<span class="search-aff-link" onclick="event.stopPropagation();hideSearchResults();window.location.href='/affiliate/${encodeURIComponent(r.webmaster_code)}'" title="Open affiliate detail page">${r.webmaster_code} ↗</span>`
+            ? `<span class="search-aff-link" onclick="event.stopPropagation();hideSearchResults();window.location.href='/affiliate/${encodeURIComponent(r.webmaster_code)}'" title="Open affiliate detail page">${escapeHtml(r.webmaster_code)} ↗</span>`
             : '<span>—</span>'}
-          <span>${r.data_type || '—'}</span>
-          <span style="opacity:0.5">${r.match_type}</span>
+          <span>${escapeHtml(r.data_type || '—')}</span>
+          <span style="opacity:0.5">${escapeHtml(r.match_type || '')}</span>
         </div>
       </div>`;
   }).join('');
@@ -1581,6 +1719,7 @@ async function openAccountDetail(duid) {
   const modal = document.getElementById('accountModal');
   const body = document.getElementById('accountModalBody');
 
+  _modalFocusReturn = document.activeElement;
   setClusterModalMode(false, 'Account Details');
   modal.classList.add('open');
   body.innerHTML = '<div class="loading-spinner">Loading account details...</div>';
@@ -1592,7 +1731,8 @@ async function openAccountDetail(duid) {
   const res = await api(`/api/account/${encodeURIComponent(duid)}`);
   
   if (res.error) {
-    body.innerHTML = `<div class="error-state"><p>Error loading account: ${res.error}</p></div>`;
+    body.innerHTML = `<div class="error-state"><p>Error loading account: ${escapeHtml(res.error)}</p></div>`;
+    _focusFirstIn(modal);
     return;
   }
   
@@ -1617,24 +1757,24 @@ async function openAccountDetail(duid) {
   body.innerHTML = `
     <div class="account-header">
       <div>
-        <div class="account-email">${account.email || 'No email'}</div>
+        <div class="account-email">${escapeHtml(account.email || 'No email')}</div>
         <div style="font-family:var(--mono);font-size:11px;color:var(--text-muted);margin-top:4px;">
-          DUID: ${account.duid || '—'}
+          DUID: ${escapeHtml(account.duid || '—')}
         </div>
       </div>
       <div class="account-risk-badge ${riskClass}">
-        ${account.risk_score != null ? `Risk: ${account.risk_score}` : 'Not Analyzed'}
+        ${account.risk_score != null ? `Risk: ${escapeHtml(account.risk_score)}` : 'Not Analyzed'}
       </div>
     </div>
     
     <div class="account-grid">
       <div class="account-field">
         <div class="account-field-label">Affiliate</div>
-        <div class="account-field-value">${account.webmaster_code || '—'}</div>
+        <div class="account-field-value">${escapeHtml(account.webmaster_code || '—')}</div>
       </div>
       <div class="account-field">
         <div class="account-field-label">Campaign</div>
-        <div class="account-field-value">${account.campaign || '—'}</div>
+        <div class="account-field-value">${escapeHtml(account.campaign || '—')}</div>
       </div>
       <div class="account-field">
         <div class="account-field-label">Payout</div>
@@ -1642,38 +1782,38 @@ async function openAccountDetail(duid) {
       </div>
       <div class="account-field">
         <div class="account-field-label">Data Type</div>
-        <div class="account-field-value">${account.data_type || '—'}</div>
+        <div class="account-field-value">${escapeHtml(account.data_type || '—')}</div>
       </div>
       <div class="account-field">
         <div class="account-field-label">IP Address</div>
-        <div class="account-field-value">${account.ip || '—'}</div>
+        <div class="account-field-value">${escapeHtml(account.ip || '—')}</div>
       </div>
       <div class="account-field">
         <div class="account-field-label">Analyzed</div>
-        <div class="account-field-value">${account.analyzed_at ? new Date(account.analyzed_at).toLocaleString() : '—'}</div>
+        <div class="account-field-value">${account.analyzed_at ? escapeHtml(new Date(account.analyzed_at).toLocaleString()) : '—'}</div>
       </div>
     </div>
     
     ${flags.length > 0 ? `
       <div class="account-section">
-        <div class="account-section-title">🚩 Fraud Flags</div>
+        <div class="account-section-title">Fraud Flags</div>
         <div class="account-flags">
-          ${flags.map(f => `<span class="account-flag">${String(f).replace(/_/g, ' ')}</span>`).join('')}
+          ${flags.map(f => `<span class="account-flag">${escapeHtml(String(f).replace(/_/g, ' '))}</span>`).join('')}
         </div>
       </div>
     ` : ''}
     
     ${outcomes.length > 0 ? `
       <div class="account-section">
-        <div class="account-section-title">📋 Outcome History</div>
+        <div class="account-section-title">Outcome History</div>
         <div class="account-related-list">
           ${outcomes.map(o => `
             <div class="account-related-item" style="cursor:default;">
               <div>
-                <strong>${o.outcome}</strong>
-                ${o.notes ? `<span style="opacity:0.7;margin-left:8px;">${o.notes}</span>` : ''}
+                <strong>${escapeHtml(o.outcome)}</strong>
+                ${o.notes ? `<span style="opacity:0.7;margin-left:8px;">${escapeHtml(o.notes)}</span>` : ''}
               </div>
-              <span style="font-size:10px;opacity:0.5;">${o.recorded_at ? new Date(o.recorded_at).toLocaleDateString() : ''}</span>
+              <span style="font-size:10px;opacity:0.5;">${o.recorded_at ? escapeHtml(new Date(o.recorded_at).toLocaleDateString()) : ''}</span>
             </div>
           `).join('')}
         </div>
@@ -1682,16 +1822,16 @@ async function openAccountDetail(duid) {
     
     ${relatedByEmail.length > 0 ? `
       <div class="account-section">
-        <div class="account-section-title">📧 Related by Email Pattern (${relatedByEmail.length})</div>
+        <div class="account-section-title">Related by Email Pattern (${relatedByEmail.length})</div>
         <div class="account-related-list">
           ${relatedByEmail.map(r => `
-            <div class="account-related-item" onclick="openAccountDetail('${r.duid}')">
+            <div class="account-related-item" onclick="openAccountDetail('${escapeAttr(r.duid)}')">
               <div>
-                <span>${r.email}</span>
-                <span style="margin-left:8px;opacity:0.5;">${r.webmaster_code || ''}</span>
+                <span>${escapeHtml(r.email)}</span>
+                <span style="margin-left:8px;opacity:0.5;">${escapeHtml(r.webmaster_code || '')}</span>
               </div>
               <span class="search-result-risk ${r.risk_score >= 50 ? '' : r.risk_score >= 25 ? 'medium' : 'low'}">
-                ${r.risk_score}
+                ${escapeHtml(r.risk_score)}
               </span>
             </div>
           `).join('')}
@@ -1701,16 +1841,16 @@ async function openAccountDetail(duid) {
     
     ${relatedByIp.length > 0 ? `
       <div class="account-section">
-        <div class="account-section-title">🌐 Related by IP Address (${relatedByIp.length})</div>
+        <div class="account-section-title">Related by IP Address (${relatedByIp.length})</div>
         <div class="account-related-list">
           ${relatedByIp.map(r => `
-            <div class="account-related-item" onclick="openAccountDetail('${r.duid}')">
+            <div class="account-related-item" onclick="openAccountDetail('${escapeAttr(r.duid)}')">
               <div>
-                <span>${r.email}</span>
-                <span style="margin-left:8px;opacity:0.5;">${r.webmaster_code || ''}</span>
+                <span>${escapeHtml(r.email)}</span>
+                <span style="margin-left:8px;opacity:0.5;">${escapeHtml(r.webmaster_code || '')}</span>
               </div>
               <span class="search-result-risk ${r.risk_score >= 50 ? '' : r.risk_score >= 25 ? 'medium' : 'low'}">
-                ${r.risk_score}
+                ${escapeHtml(r.risk_score)}
               </span>
             </div>
           `).join('')}
@@ -1719,13 +1859,13 @@ async function openAccountDetail(duid) {
     ` : ''}
     
     <div class="account-actions">
-      <button class="btn btn-fraud" onclick="recordAccountOutcome('${account.duid}', 'confirmed_fraud')">
+      <button class="btn btn-fraud" onclick="recordAccountOutcome('${escapeAttr(account.duid)}', 'confirmed_fraud')">
         Mark as Fraud
       </button>
-      <button class="btn btn-fp" onclick="recordAccountOutcome('${account.duid}', 'false_positive')">
+      <button class="btn btn-fp" onclick="recordAccountOutcome('${escapeAttr(account.duid)}', 'false_positive')">
         False Positive
       </button>
-      <button class="btn btn-review" onclick="recordAccountOutcome('${account.duid}', 'under_review')">
+      <button class="btn btn-review" onclick="recordAccountOutcome('${escapeAttr(account.duid)}', 'under_review')">
         Under Review
       </button>
       <a href="/account/${encodeURIComponent(account.duid)}" target="_blank"
@@ -1737,11 +1877,16 @@ async function openAccountDetail(duid) {
       </button>
     </div>
   `;
+  _focusFirstIn(modal);
 }
 
 function closeAccountModal() {
   document.getElementById('accountModal').classList.remove('open');
   setClusterModalMode(false, 'Account Details');
+  if (_modalFocusReturn?.focus) {
+    try { _modalFocusReturn.focus(); } catch (_) { /* ignore */ }
+  }
+  _modalFocusReturn = null;
 }
 
 async function recordAccountOutcome(duid, outcome) {
@@ -3785,23 +3930,47 @@ async function loadOverview() {
 }
 
 async function loadReviewQueue() {
+  const wrap = document.getElementById('highRiskTableWrap');
+  if (wrap) wrap.innerHTML = loading();
+  const pendWrap = document.getElementById('pendingTableWrap');
+  if (pendWrap) pendWrap.innerHTML = loading();
+
   await loadHouseAffiliates();
   await loadAffiliateActions();
+  // Populate SLA backlog buckets without requiring Overview first
+  void loadDigest();
+
   const [highRiskRes, pendingRes] = await Promise.all([
     api('/api/fraud-results?min_risk=50&limit=500'),
-    api('/api/pending-reviews')
+    api('/api/pending-reviews?limit=200')
   ]);
 
-  let highRisk = highRiskRes.data;
-  const wrap = document.getElementById('highRiskTableWrap');
+  const unwrapList = (payload, fallbackLimit) => {
+    if (Array.isArray(payload)) {
+      return { records: payload, total: payload.length, limit: fallbackLimit, truncated: false };
+    }
+    if (payload && typeof payload === 'object') {
+      const records = payload.records || payload.data || [];
+      const limit = payload.limit != null ? payload.limit : fallbackLimit;
+      const total = payload.total != null ? payload.total : records.length;
+      const truncated = Boolean(payload.truncated) || records.length < total;
+      return { records, total, limit, truncated };
+    }
+    return { records: [], total: 0, limit: fallbackLimit, truncated: false };
+  };
+
+  const hrMeta = unwrapList(highRiskRes.data, 500);
+  const pendMeta = unwrapList(pendingRes.data, 200);
 
   if (highRiskRes.error) {
     if (wrap) wrap.innerHTML = errorState('Failed to load data', highRiskRes.error, 'loadReviewQueue()');
-  } else if (!highRisk || highRisk.length === 0) {
+  } else if (!hrMeta.records.length) {
     if (wrap) wrap.innerHTML = emptyState('⊘', 'No high-risk accounts', 'Run fraud analysis to populate this view.');
     _highRiskData = [];
     rawDataCache.hr = [];
+    _highRiskTotal = 0;
   } else {
+    let highRisk = hrMeta.records;
     const seen = new Set();
     highRisk = highRisk.filter(r => {
       const key = r.duid || r.email;
@@ -3810,17 +3979,28 @@ async function loadReviewQueue() {
       return true;
     });
     rawDataCache.hr = [...highRisk];
+    _highRiskTotal = hrMeta.total;
     filterTable('hr', '');
   }
 
-  _pendingData = pendingRes.data || [];
+  _pendingData = pendingRes.error ? [] : pendMeta.records;
+  _pendingTotal = pendingRes.error ? 0 : pendMeta.total;
+
   const reviewMetrics = document.getElementById('reviewMetrics');
   if (reviewMetrics) {
-    const hrCount = rawDataCache.hr?.length || 0;
-    const pendCount = _pendingData.length;
+    const hrLoaded = rawDataCache.hr?.length || 0;
+    const hrTotal = _highRiskTotal || hrLoaded;
+    const pendLoaded = _pendingData.length;
+    const pendTotal = _pendingTotal || pendLoaded;
+    const hrLabel = hrLoaded < hrTotal
+      ? `${fmt(hrLoaded)} of ${fmt(hrTotal)}`
+      : fmt(hrLoaded);
+    const pendLabel = pendLoaded < pendTotal
+      ? `${fmt(pendLoaded)} of ${fmt(pendTotal)}`
+      : fmt(pendLoaded);
     reviewMetrics.innerHTML = `
-      <div class="metric-card"><div class="metric-label">High Risk Loaded</div><div class="metric-value high">${fmt(hrCount)}</div></div>
-      <div class="metric-card"><div class="metric-label">Pending Review</div><div class="metric-value medium">${fmt(pendCount)}</div></div>
+      <div class="metric-card"><div class="metric-label">High Risk Loaded</div><div class="metric-value high">${hrLabel}</div></div>
+      <div class="metric-card"><div class="metric-label">Pending Review</div><div class="metric-value medium">${pendLabel}</div></div>
       <div class="metric-card"><div class="metric-label">Purpose</div><div class="metric-value" style="font-size:14px;line-height:1.4;">Triage &amp; record outcomes</div></div>`;
   }
   renderPendingTable();
@@ -3829,24 +4009,34 @@ async function loadReviewQueue() {
 function renderPendingTable() {
   const pWrap = document.getElementById('pendingTableWrap');
   const pc = document.getElementById('pendingCount');
-  if (pc) pc.textContent = _pendingData.length + ' pending';
+  const totalPending = typeof _pendingTotal === 'number' ? _pendingTotal : _pendingData.length;
+  if (pc) {
+    pc.textContent = _pendingData.length < totalPending
+      ? `${_pendingData.length} of ${totalPending} pending`
+      : `${_pendingData.length} pending`;
+  }
   if (!pWrap) return;
   if (_pendingData.length === 0) {
     pWrap.innerHTML = emptyState('✓', 'All caught up', 'No unreviewed high-risk accounts.');
     updateTablePagination('pend', 1, 1, 0);
     return;
   }
-  const pageMeta = getTablePageSlice('pend', _pendingData);
-  pWrap.innerHTML = buildTable('pend', [
-    { key: 'email', label: 'Email', hint: 'High-risk account awaiting a review outcome.', render: v => truncate(v, 30) },
+  const pendCols = [
+    { key: 'email', label: 'Email', hint: 'High-risk account awaiting a review outcome.', render: v => escapeHtml(truncate(v, 30)) },
     { key: 'risk_score', label: 'Risk', numeric: true, right: true, hint: 'Model score ≥ high-risk threshold; no outcome recorded yet.', render: v => riskBadge(v) },
     { key: 'payout_amount', label: 'Payout', numeric: true, right: true, hint: 'Payout amount from the source record.', render: v => fmtCur(v) },
     { key: 'duid', label: 'Actions', hint: 'Quick-record outcome without opening the full review modal.', render: (v) =>
-      `<button class="btn btn-sm btn-fraud" onclick="event.stopPropagation();pendingActionByDuid('${v}','confirmed_fraud')">Fraud</button> ` +
-      `<button class="btn btn-sm btn-fp" onclick="event.stopPropagation();pendingActionByDuid('${v}','false_positive')">FP</button> ` +
-      `<button class="btn btn-sm btn-review" onclick="event.stopPropagation();pendingActionByDuid('${v}','under_review')">Review</button>`
+      `<button class="btn btn-sm btn-fraud" onclick="event.stopPropagation();pendingActionByDuid('${escapeAttr(v)}','confirmed_fraud')">Fraud</button> ` +
+      `<button class="btn btn-sm btn-fp" onclick="event.stopPropagation();pendingActionByDuid('${escapeAttr(v)}','false_positive')">FP</button> ` +
+      `<button class="btn btn-sm btn-review" onclick="event.stopPropagation();pendingActionByDuid('${escapeAttr(v)}','under_review')">Review</button>`
     }
-  ], pageMeta.pageRows, { clickable: true, onClick: 'openPendingModalByDuid', onClickKey: 'duid', emptyIcon: '✓', emptyTitle: 'All caught up' });
+  ];
+  const sorted = sortRows(_pendingData, pendCols, sortState.pend);
+  const pageMeta = getTablePageSlice('pend', sorted);
+  pWrap.innerHTML = buildTable('pend', pendCols, pageMeta.pageRows, {
+    clickable: true, onClick: 'openPendingModalByDuid', onClickKey: 'duid',
+    emptyIcon: '✓', emptyTitle: 'All caught up', alreadySorted: true,
+  });
   updateTablePagination('pend', pageMeta.page, pageMeta.totalPages, pageMeta.totalRows, pageMeta.pageSize);
 }
 
@@ -5293,8 +5483,17 @@ async function loadReports() {
     wrap.innerHTML = errorState('Failed to load reports', res.error, 'loadReports()');
     return;
   }
-  
-  let data = res.data || [];
+
+  // Support both legacy array and Phase-1 {records,total,limit,truncated} shapes
+  let payload = res.data;
+  let fetchTotal = null;
+  let fetchTruncated = false;
+  if (payload && !Array.isArray(payload) && Array.isArray(payload.records)) {
+    fetchTotal = payload.total;
+    fetchTruncated = Boolean(payload.truncated);
+    payload = payload.records;
+  }
+  let data = payload || [];
   // One row per DUID (defensive; server merge should not fan out duplicates).
   const seenReports = new Set();
   data = data.filter(r => {
@@ -5334,9 +5533,9 @@ async function loadReports() {
   const totalPayout = data.reduce((sum, r) => sum + (r.payout_amount || 0), 0);
   const uniqueAffiliates = new Set(data.map(r => r.webmaster_code).filter(Boolean)).size;
   
-  const atFetchCap = data.length >= fetchLimit;
+  const atFetchCap = fetchTruncated || data.length >= fetchLimit;
   const capHint = atFetchCap
-    ? ` <span class="metric-hint" title="More accounts may match — raise Max records or export CSV">(cap)</span>`
+    ? ` <span class="metric-hint" title="More accounts may match — raise Max records or export CSV">(cap${fetchTotal != null ? `: ${fmt(fetchTotal)} total` : ''})</span>`
     : '';
   metrics.innerHTML = `
     <div class="metric-card"><div class="metric-label">Records Loaded</div><div class="metric-value">${fmt(data.length)}${capHint}</div></div>
@@ -5535,31 +5734,34 @@ function renderReportsTable() {
     return;
   }
 
-  const pageRows = getReportsPageSlice(reportsData);
-  updateReportsPagination(reportsData.length, reportsCurrentPage, REPORTS_PAGE_SIZE);
-
-  wrap.innerHTML = buildTable('reports', [
+  const reportCols = [
       { key: 'email', label: 'Email', hint: 'From fraud_results; badge if the same email appears on multiple DUIDs.', render: (v, row) => {
         const count = reportsData.filter(r => r.email === v).length;
         const countBadge = count > 1 ? `<span class="email-dup-badge" title="${count} accounts with this email">${count}</span>` : '';
-        return truncate(v, 32) + countBadge;
+        return escapeHtml(truncate(v, 32)) + countBadge;
       }},
       { key: 'risk_score', label: 'Risk', numeric: true, right: true, hint: 'Latest model score for this row.', render: v => riskBadge(v) },
       { key: 'flags', label: 'Flags', hint: 'Rules that fired; truncated in grid view.', render: v => {
         if (!v) return '—';
         const flags = String(v).replace(/[\[\]']/g, '').split(',').map(f => f.trim()).filter(f => f);
-        return flags.slice(0, 2).map(f => `<span class="flag-tag">${f.replace('_', ' ')}</span>`).join(' ') + 
+        return flags.slice(0, 2).map(f => `<span class="flag-tag">${escapeHtml(f.replace('_', ' '))}</span>`).join(' ') + 
                (flags.length > 2 ? ` +${flags.length - 2}` : '');
       }},
       { key: 'payout_amount', label: 'Payout', numeric: true, right: true, hint: 'Payout amount when present on the record.', render: v => fmtCur(v) },
-      { key: 'webmaster_code', label: 'Affiliate', muted: true, hint: 'webmaster_code on the analyzed record.', render: v => v || '<span class="muted">—</span>' },
-      { key: 'data_type', label: 'Type', muted: true, hint: 'free vs paid source row used in analysis.' }
-    ], pageRows, {
+      { key: 'webmaster_code', label: 'Affiliate', muted: true, hint: 'webmaster_code on the analyzed record.', render: v => v ? escapeHtml(v) : '<span class="muted">—</span>' },
+      { key: 'data_type', label: 'Type', muted: true, hint: 'free vs paid source row used in analysis.', render: v => escapeHtml(v || '—') }
+    ];
+  const sorted = sortRows(reportsData, reportCols, sortState.reports);
+  const pageRows = getReportsPageSlice(sorted);
+  updateReportsPagination(reportsData.length, reportsCurrentPage, REPORTS_PAGE_SIZE);
+
+  wrap.innerHTML = buildTable('reports', reportCols, pageRows, {
       clickable: true,
       onClick: 'openReportModalByDuid',
       onClickKey: 'duid',
       emptyIcon: '📋',
       emptyTitle: 'No matching records',
+      alreadySorted: true,
     });
 }
 
@@ -11070,55 +11272,6 @@ function fabAction(action) {
 document.addEventListener('click', e => {
   if (fabOpen && !e.target.closest('.fab-container')) {
     closeFabMenu();
-  }
-});
-
-// ═══ KEYBOARD SHORTCUTS (G + key for navigation) ═══
-let lastKeyTime = 0;
-let lastKey = '';
-
-document.addEventListener('keydown', e => {
-  // Skip if typing in input/textarea
-  if (e.target.matches('input, textarea, select')) return;
-
-  const now = Date.now();
-  const timeSinceLastKey = now - lastKeyTime;
-
-  // G + key shortcuts (within 500ms)
-  if (lastKey === 'g' && timeSinceLastKey < 500) {
-    switch(e.key.toLowerCase()) {
-      case 'o': switchTab('overview'); break;
-      case 'q': switchTab('review'); break;
-      case 'a': switchTab('affiliates'); break;
-      case 'c': switchTab('campaigns'); break;
-      case 't': switchTab('temporal'); break;
-      case 's': switchTab('settings'); break;
-    }
-    lastKey = '';
-    return;
-  }
-
-  // Single key shortcuts
-  switch(e.key.toLowerCase()) {
-    case 'g':
-      lastKey = 'g';
-      lastKeyTime = now;
-      break;
-    case 'r':
-      if (!e.metaKey && !e.ctrlKey) {
-        loadTabData(currentTab);
-        showToast('Refreshed');
-      }
-      break;
-    case 't':
-      if (!e.metaKey && !e.ctrlKey) {
-        toggleTheme();
-      }
-      break;
-    case '/':
-      e.preventDefault();
-      document.getElementById('globalSearchInput')?.focus();
-      break;
   }
 });
 
